@@ -1,10 +1,9 @@
 import shutil
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
-from typing import Protocol, Required, TypedDict, cast
+from typing import Required, TypedDict, cast
 
 import yt_dlp
 from audio_separator.separator import Separator
@@ -16,6 +15,7 @@ logger = get_logger(__name__)
 
 MODEL_FILENAME = "htdemucs_ft.yaml"
 DEFAULT_PROCESSING_TIMEOUT_SECONDS = 300
+BASE_YDL_OPTS: "YoutubeDLOpts" = {"quiet": True, "no_warnings": True}
 
 
 class MdxParams(TypedDict):
@@ -60,15 +60,6 @@ mdx_params: MdxParams = {
     "batch_size": 1,
     "enable_denoise": False,
 }
-
-
-class SeparatorProvider(Protocol):
-    def get_separator(self) -> Separator: ...
-
-    def initialize_model(self) -> None: ...
-
-    @property
-    def separator_lock(self) -> threading.RLock: ...
 
 
 class DefaultSeparatorProvider:
@@ -194,26 +185,6 @@ def run_with_timeout(fn, *args, timeout: int = 300):
             raise TimeoutError(f"Operation timed out after {timeout} seconds") from exc
 
 
-def retry_with_backoff(func, max_retries=3, base_delay=1, backoff_factor=2, max_delay=60):
-    """Retry function with exponential backoff."""
-    for attempt in range(max_retries):
-        try:
-            return func()
-        except (OSError, RuntimeError) as e:
-            if attempt == max_retries - 1:
-                raise e
-
-            delay = min(base_delay * (backoff_factor**attempt), max_delay)
-            logger.warning(
-                "Attempt failed, retrying",
-                attempt=attempt + 1,
-                max_retries=max_retries,
-                delay=delay,
-                error=str(e),
-            )
-            time.sleep(delay)
-
-
 class AudioProcessor:
 
     def __init__(
@@ -264,7 +235,7 @@ class AudioProcessor:
             raise ValueError(f"Unsupported audio format: {audio_file.suffix}")
 
     def _validate_separated_files(self, output_dir: Path, track_id: str = "") -> dict[str, Path]:
-        stem_files = self.storage.detect_stem_files(output_dir)
+        stem_files = AudioClassifier.detect_stem_files(output_dir)
         is_valid, missing_stems = AudioClassifier.validate_required_stems(stem_files)
         if is_valid:
             return stem_files
@@ -391,13 +362,6 @@ class AudioProcessor:
         result["storage"] = "r2"
         return result
 
-    def _get_base_ydl_opts(self) -> YoutubeDLOpts:
-        opts: YoutubeDLOpts = {
-            "quiet": True,
-            "no_warnings": True,
-        }
-        return opts
-
     def _validate_search_results(self, search_results: YtDlpSearchResult) -> YtDlpEntry:
         entries = search_results.get("entries")
         if not entries:
@@ -423,10 +387,9 @@ class AudioProcessor:
     ) -> tuple[Path, str | None]:
         def _download():
             search_term = f"ytsearch1:{search_query}"
-            base_opts = self._get_base_ydl_opts()
 
             # First pass: extract info to validate file size before downloading
-            with yt_dlp.YoutubeDL({**base_opts, "format": "bestaudio/best"}) as ydl:  # pyright: ignore[reportArgumentType]
+            with yt_dlp.YoutubeDL({**BASE_YDL_OPTS, "format": "bestaudio/best"}) as ydl:  # pyright: ignore[reportArgumentType]
                 search_results = ydl.extract_info(search_term, download=False)
                 if not search_results:
                     raise RuntimeError("No search results found")
@@ -437,7 +400,7 @@ class AudioProcessor:
 
             # Second pass: download the validated video
             download_opts: YoutubeDLOpts = {
-                **base_opts,
+                **BASE_YDL_OPTS,
                 "format": "bestaudio[ext=m4a]/bestaudio",
                 "outtmpl": str(job_dir / "original.%(ext)s"),
             }
@@ -481,25 +444,14 @@ class AudioProcessor:
                 models_dir=self.separator_provider.models_dir,
             )
 
-            try:
-                output_files = self.separator_provider.separate_and_move(
-                    audio_file, output_dir, timeout=processing_timeout
-                )
-                logger.info(
-                    "Separation completed", track_id=track_id, output_files=output_files
-                )
-            except Exception as sep_error:
-                logger.error(
-                    "Separation process failed",
-                    track_id=track_id,
-                    error=str(sep_error),
-                    error_type=type(sep_error).__name__,
-                )
-                raise
+            output_files = self.separator_provider.separate_and_move(
+                audio_file, output_dir, timeout=processing_timeout
+            )
+            logger.info("Separation completed", track_id=track_id, output_files=output_files)
 
         except (RuntimeError, OSError, TimeoutError, ValueError, FileNotFoundError) as e:
             logger.error(
-                "Failed to process file",
+                "Audio separation failed",
                 track_id=track_id,
                 audio_file_path=str(audio_file),
                 error=str(e),
@@ -508,16 +460,3 @@ class AudioProcessor:
             raise RuntimeError(f"Audio separation failed: {str(e)}") from e
 
         return self._validate_separated_files(output_dir, track_id)
-
-    def separate_audio(self, audio_file: Path) -> dict[str, Path]:
-        output_dir = audio_file.parent / "separated"
-        output_dir.mkdir(exist_ok=True, parents=True)
-
-        try:
-            self._validate_audio_file(audio_file)
-            self.separator_provider.separate_and_move(audio_file, output_dir)
-
-            return self._validate_separated_files(output_dir)
-
-        except Exception as e:
-            raise RuntimeError(f"Audio separation failed: {str(e)}") from e
