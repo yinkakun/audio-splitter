@@ -147,3 +147,20 @@ class Config(BaseSettings):
     def queue_names(self) -> list[str]:
         return [name.strip() for name in self.worker_queue_names.split(",") if name.strip()]
 
+    def validate_for_production(self) -> None:
+        missing_r2_configs = []
+
+        if not self.cloudflare_account_id:
+            missing_r2_configs.append("CLOUDFLARE_ACCOUNT_ID")
+        if not self.r2_access_key_id:
+            missing_r2_configs.append("R2_ACCESS_KEY_ID")
+        if not self.r2_secret_access_key:
+            missing_r2_configs.append("R2_SECRET_ACCESS_KEY")
+        if not self.r2_public_domain:
+            missing_r2_configs.append("R2_PUBLIC_DOMAIN")
+
+        if missing_r2_configs:
+            raise RuntimeError(
+                "Missing required R2 environment variables: "
+                + ", ".join(missing_r2_configs)
+            )

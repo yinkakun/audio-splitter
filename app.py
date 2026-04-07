@@ -2,47 +2,8 @@ from fastapi import FastAPI
 
 from api.routes import create_fastapi_app
 from config.config import Config
-from config.logger import get_logger, setup_logging
-from services.audio_processor import AudioProcessor
+from config.logger import setup_logging
 from services.storage import CloudflareR2, R2Storage
-
-logger = get_logger(__name__)
-
-
-def validate_environment(config):
-    """Validate environment configuration"""
-    warnings = []
-    errors = []
-
-    if not config.r2_storage_enabled:
-        errors.append("R2 storage is required but not configured")
-    else:
-        missing_r2_configs = []
-        if not config.cloudflare_account_id:
-            missing_r2_configs.append("CLOUDFLARE_ACCOUNT_ID")
-        if not config.r2_access_key_id:
-            missing_r2_configs.append("R2_ACCESS_KEY_ID")
-        if not config.r2_secret_access_key:
-            missing_r2_configs.append("R2_SECRET_ACCESS_KEY")
-        if not config.r2_public_domain:
-            missing_r2_configs.append("R2_PUBLIC_DOMAIN")
-
-        if missing_r2_configs:
-            errors.append(
-                f"Missing required R2 environment variables: {', '.join(missing_r2_configs)}"
-            )
-
-    for w in warnings:
-        logger.warning(w)
-
-    for error in errors:
-        logger.error(error)
-
-    if errors:
-        raise RuntimeError(f"Configuration errors: {'; '.join(errors)}")
-
-    return warnings
-
 
 def create_app() -> FastAPI:
     config = Config()
