@@ -28,7 +28,7 @@ docker-compose up --scale worker=2
 curl -X POST http://localhost:5500/separate-audio \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your_api_secret_key" \
-  -d "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  -d '{"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "request_id": "your-correlation-id"}'
 
 # Check status
 curl -H "Authorization: Bearer your_api_secret_key" \
@@ -50,15 +50,62 @@ curl -H "Authorization: Bearer your_api_secret_key" \
 curl -X POST http://localhost:5500/separate-audio \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your_api_secret_key" \
-  -d "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+  -d '{"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "request_id": "your-correlation-id"}'
 ```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+
+| `youtube_url` | string | Yes | YouTube video URL |
+| `request_id` | string | Yes | Caller-provided correlation ID for webhook callbacks |
 
 ### Response
 
 ```json
 {
   "track_id": "uuid",
-  "status": "processing|completed|failed"
+  "request_id": "your-correlation-id",
+  "status": "processing",
+  "message": "Audio separation started"
+}
+```
+
+### Webhook Payload
+
+When a job completes (or fails), a webhook is sent to the configured `WEBHOOK_URL`. Multiple requests for the same URL are deduplicated - only one job runs, and all `request_id`s are included in the callback.
+
+**Success:**
+
+```json
+{
+  "status": "completed",
+  "track_id": "uuid",
+  "youtube_url": "https://www.youtube.com/watch?v=...",
+  "request_ids": ["request-1", "request-2"],
+  "progress": 100,
+  "created_at": 1234567890.0,
+  "result": {
+    "stems_urls": {
+      "vocals": "https://...",
+      "drums": "https://...",
+      "bass": "https://...",
+      "other": "https://..."
+    }
+  }
+}
+```
+
+**Failure:**
+
+```json
+{
+  "status": "failed",
+  "track_id": "uuid",
+  "youtube_url": "https://www.youtube.com/watch?v=...",
+  "request_ids": ["request-1", "request-2"],
+  "progress": 0,
+  "created_at": 1234567890.0,
+  "error": "Error message"
 }
 ```
 

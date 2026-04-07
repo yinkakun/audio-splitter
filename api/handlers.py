@@ -48,6 +48,7 @@ def validate_track_id(track_id: str) -> bool:
 
 class SeparationRequest(BaseModel):
     youtube_url: str = Field(..., min_length=1, max_length=200)
+    request_id: str = Field(..., min_length=1, max_length=100)
 
     @field_validator("youtube_url")
     @classmethod
@@ -60,6 +61,11 @@ class SeparationRequest(BaseModel):
         if not re.match(youtube_pattern, sanitized):
             raise ValueError("Invalid YouTube URL format")
         return sanitized
+
+    @field_validator("request_id")
+    @classmethod
+    def validate_request_id(cls, v):
+        return sanitize_input(v, 100)
 
 
 class HealthResponse(BaseModel):
@@ -162,9 +168,14 @@ def register_routes(app: FastAPI, config, storage):
                 status_code=status.HTTP_400_BAD_REQUEST, detail=f"Input validation failed: {str(e)}"
             ) from e
 
+        request_id = separation_request.request_id
+
         if cache_manager:
             cached_result = await cache_manager.get_cached_or_processing(youtube_url)
             if cached_result:
+                # Add this request as a subscriber if URL is still processing
+                if cached_result.get("status") == "processing":
+                    await cache_manager.add_subscriber(youtube_url, request_id)
                 logger.info(f"Returning cached/processing result for: {youtube_url[:50]}")
                 return cached_result
 
@@ -178,7 +189,7 @@ def register_routes(app: FastAPI, config, storage):
 
         cache_key = ""
         if cache_manager:
-            cache_key = await cache_manager.mark_processing_start(youtube_url, track_id)
+            cache_key = await cache_manager.mark_processing_start(youtube_url, track_id, request_id)
 
         storage_config = StorageConfig(
             account_id=config.cloudflare_account_id,
@@ -202,6 +213,7 @@ def register_routes(app: FastAPI, config, storage):
             webhook_config=WebhookConfig(url=config.webhook_url, secret=config.webhook_secret),
             directory_config=DirectoryConfig(models=config.models_dir, working=config.working_dir),
             cache_manager_config=cache_manager_config,
+            request_id=request_id,
         )
 
         queue_manager.enqueue_job(job_request)
@@ -214,6 +226,7 @@ def register_routes(app: FastAPI, config, storage):
 
         return {
             "track_id": track_id,
+            "request_id": request_id,
             "status": JobStatus.PROCESSING.value,
             "message": "Audio separation started",
         }

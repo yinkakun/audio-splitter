@@ -225,12 +225,15 @@ class AudioCache:
         except RuntimeError as e:
             logger.error(f"Failed to cache result for {cache_key}: {e}")
 
-    async def _mark_processing(self, cache_key: str, youtube_url: str, track_id: str) -> None:
+    async def _mark_processing(
+        self, cache_key: str, youtube_url: str, track_id: str, request_id: str
+    ) -> None:
         try:
             processing_data = {
                 "status": "processing",
                 "youtube_url": youtube_url,
                 "track_id": track_id,
+                "request_ids": [request_id] if request_id else [],
                 "created_at": time.time(),
                 "last_accessed": time.time(),
             }
@@ -240,6 +243,52 @@ class AudioCache:
 
         except RuntimeError as e:
             logger.error(f"Failed to mark processing for {cache_key}: {e}")
+
+    async def add_subscriber(self, youtube_url: str, request_id: str) -> bool:
+        """Add a request_id to the subscriber list for an already-processing URL."""
+        if not request_id:
+            return False
+
+        cache_key = self._generate_cache_key(youtube_url)
+        try:
+            raw_data = await self.cache.get_key(f"audio:{cache_key}")
+            if not raw_data:
+                return False
+
+            data = self._parse_cache_response(raw_data)
+            if not data or data.get("status") != "processing":
+                return False
+
+            request_ids = data.get("request_ids", [])
+            if request_id not in request_ids:
+                request_ids.append(request_id)
+                data["request_ids"] = request_ids
+                data["last_accessed"] = time.time()
+                await self.cache.put_key(f"audio:{cache_key}", data, ttl=self.processing_ttl)
+                logger.debug(f"Added subscriber {request_id} to cache key: {cache_key}")
+
+            return True
+
+        except RuntimeError as e:
+            logger.error(f"Failed to add subscriber for {cache_key}: {e}")
+            return False
+
+    async def get_request_ids(self, cache_key: str) -> list[str]:
+        """Get all request_ids subscribed to a cache entry."""
+        try:
+            raw_data = await self.cache.get_key(f"audio:{cache_key}")
+            if not raw_data:
+                return []
+
+            data = self._parse_cache_response(raw_data)
+            if not data:
+                return []
+
+            return data.get("request_ids", [])
+
+        except RuntimeError as e:
+            logger.warning(f"Failed to get request_ids for {cache_key}: {e}")
+            return []
 
     async def get_cached_or_processing(self, youtube_url: str) -> dict[str, Any] | None:
         cache_key = self._generate_cache_key(youtube_url)
@@ -294,9 +343,11 @@ class AudioCache:
         except RuntimeError as e:
             logger.warning(f"Failed to remove cache entry {cache_key}: {e}")
 
-    async def mark_processing_start(self, youtube_url: str, track_id: str) -> str:
+    async def mark_processing_start(
+        self, youtube_url: str, track_id: str, request_id: str = ""
+    ) -> str:
         cache_key = self._generate_cache_key(youtube_url)
-        await self._mark_processing(cache_key, youtube_url, track_id)
+        await self._mark_processing(cache_key, youtube_url, track_id, request_id)
         return cache_key
 
     async def cache_completed_result(

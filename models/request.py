@@ -44,3 +44,4 @@ class ProcessingJobRequest:
     webhook_config: WebhookConfig
     directory_config: DirectoryConfig
     cache_manager_config: AudioCacheConfig | None = None
+    request_id: str = ""

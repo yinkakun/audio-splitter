@@ -72,6 +72,8 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
     if job:
         logger.info("Starting RQ job", job_id=job.id, track_id=job_request.track_id)
 
+    request_ids: list[str] = [job_request.request_id] if job_request.request_id else []
+
     try:
         storage = get_storage_client(
             account_id=job_request.storage_config.account_id,
@@ -81,7 +83,6 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
             public_domain=job_request.storage_config.public_domain,
         )
 
-        # Use pre-initialized global separator provider if available
         global_separator = get_global_separator_provider()
         audio_processor = AudioProcessor(
             storage,
@@ -98,6 +99,17 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
         if job_request.cache_manager_config:
             redis_cache = RedisCache(job_request.cache_manager_config.redis_config.url)
             cache_manager = AudioCache(redis_cache, storage)
+
+        # Get all request_ids that subscribed to this URL (may include more than initial)
+        if cache_manager and job_request.cache_key:
+            try:
+                cached_request_ids = asyncio.run(
+                    cache_manager.get_request_ids(job_request.cache_key)
+                )
+                if cached_request_ids:
+                    request_ids = cached_request_ids
+            except RuntimeError as e:
+                logger.warning(f"Failed to get request_ids: {e}")
 
         logger.info(
             "Starting audio processing job",
@@ -121,6 +133,8 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
             "created_at": time.time(),
             "status": JobStatus.COMPLETED.value,
             "track_id": job_request.track_id,
+            "request_ids": request_ids,
+            "youtube_url": job_request.youtube_url,
         }
 
         if cache_manager and job_request.cache_key:
@@ -168,6 +182,8 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
             "created_at": time.time(),
             "status": JobStatus.FAILED.value,
             "track_id": job_request.track_id,
+            "request_ids": request_ids,
+            "youtube_url": job_request.youtube_url,
         }
 
         if job_request.webhook_config.url:
