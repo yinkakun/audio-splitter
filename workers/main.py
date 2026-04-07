@@ -31,7 +31,7 @@ def main():
         sys.exit(1)
 
     worker_name = config.worker_name
-    queue_names = config.queue_names or ["default"]
+    queue_names = config.queue_names
     worker_concurrency = config.worker_concurrency
 
     logger.info(
@@ -39,7 +39,6 @@ def main():
         worker_name=worker_name,
         queue_names=queue_names,
         concurrency=worker_concurrency,
-        redis_url=config.redis_url[:50] + "...",
     )
 
     try:
@@ -77,8 +76,6 @@ def main():
     except (ConnectionError, RuntimeError) as e:
         logger.error(f"Worker failed to start: {e}", exc_info=True)
         sys.exit(1)
-    finally:
-        logger.info("Worker shutdown complete")
 
 
 if __name__ == "__main__":

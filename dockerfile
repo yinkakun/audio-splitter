@@ -39,9 +39,6 @@ RUN groupadd -r -g 1000 appuser && \
 WORKDIR /app
 RUN chown appuser:appuser /app
 
-# Install uv for runtime commands
-RUN pip install uv
-
 # Copy virtual environment from builder
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 
@@ -63,14 +60,14 @@ RUN mkdir -p /home/appuser/audio_workspace /home/appuser/models
 # Web server stage
 FROM base AS web
 EXPOSE 8000
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=180s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uv", "run", "uvicorn", "app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
 
 # Worker stage
 FROM base AS worker
-CMD ["uv", "run", "python", "worker.py"]
+CMD ["python", "worker.py"]
 
 # Default stage
 FROM web AS default

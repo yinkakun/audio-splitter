@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 from urllib.parse import urlparse
 
 import redis
@@ -73,7 +73,7 @@ class JobQueue:
         logger.info("Enqueued audio processing job", job_id=job.id, track_id=job_request.track_id)
         return job
 
-    def get_job_status(self, job_id: str) -> Dict[str, Any]:
+    def get_job_status(self, job_id: str) -> dict[str, Any]:
         """Get job status and result"""
         queue = self.get_queue()
         job = queue.fetch_job(job_id)
@@ -107,7 +107,7 @@ class JobQueue:
 
         return result
 
-    def get_queue_info(self) -> Dict[str, Any]:
+    def get_queue_info(self) -> dict[str, Any]:
         queue = self.get_queue()
         return {
             "name": queue.name,
