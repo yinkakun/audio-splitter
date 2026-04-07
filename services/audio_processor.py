@@ -11,6 +11,7 @@ from yt_dlp.utils import DownloadError, ExtractorError
 
 from config.logger import get_logger
 from services.audio_classifier import AudioClassifier
+
 logger = get_logger(__name__)
 
 MODEL_FILENAME = "htdemucs_ft.yaml"
@@ -47,7 +48,7 @@ class YtDlpSearchResult(TypedDict, total=False):
 
 class AudioProcessResult(TypedDict, total=False):
     original_title: str
-    track_id: str
+    track_id: Required[str]
     stems_urls: dict[str, str]
     storage: str
     error: str
@@ -221,7 +222,9 @@ class AudioProcessor:
         size_mb = int(size_bytes) / (1024 * 1024)
         if size_mb > max_file_size_mb:
             approx_label = " (approx)" if is_approx else ""
-            raise ValueError(f"File too large{approx_label}: {size_mb:.1f}MB (limit: {max_file_size_mb}MB)")
+            raise ValueError(
+                f"File too large{approx_label}: {size_mb:.1f}MB (limit: {max_file_size_mb}MB)"
+            )
 
     def _validate_audio_file(self, audio_file: Path) -> None:
         if not audio_file.exists():
@@ -389,7 +392,9 @@ class AudioProcessor:
             search_term = f"ytsearch1:{search_query}"
 
             # First pass: extract info to validate file size before downloading
-            with yt_dlp.YoutubeDL({**BASE_YDL_OPTS, "format": "bestaudio/best"}) as ydl:  # pyright: ignore[reportArgumentType]
+            with yt_dlp.YoutubeDL(
+                {**BASE_YDL_OPTS, "format": "bestaudio/best"}
+            ) as ydl:  # pyright: ignore[reportArgumentType]
                 search_results = ydl.extract_info(search_term, download=False)
                 if not search_results:
                     raise RuntimeError("No search results found")

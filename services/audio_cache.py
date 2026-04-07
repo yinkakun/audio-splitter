@@ -4,28 +4,25 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Protocol
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
-from config.constants import (
-    CACHE_TTL_SECONDS,
-    PROCESSING_TTL_SECONDS,
-    CACHE_CLEANUP_TTL_SECONDS,
-)
+from config.constants import CACHE_CLEANUP_TTL_SECONDS, CACHE_TTL_SECONDS, PROCESSING_TTL_SECONDS
 from config.logger import get_logger
+from services.audio_processor import AudioProcessResult
 
 logger = get_logger(__name__)
 
 
 class CacheProtocol(Protocol):
     async def get_key(self, key: str) -> dict | None: ...
-    async def put_key(self, key: str, value: Dict[str, Any], ttl: int | None = None) -> bool: ...
+    async def put_key(self, key: str, value: dict[str, Any], ttl: int | None = None) -> bool: ...
 
 
 @dataclass
 class AudioResult:
     track_id: str
-    stems_urls: Dict[str, str]
+    stems_urls: dict[str, str]
     created_at: float
     processing_time: float
 
@@ -72,7 +69,7 @@ class AudioCache:
         hash_digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         return hash_digest[:32]
 
-    def _parse_cache_response(self, raw_data: Any) -> Dict[str, Any] | None:
+    def _parse_cache_response(self, raw_data: Any) -> dict[str, Any] | None:
         if not raw_data:
             return None
 
@@ -85,7 +82,7 @@ class AudioCache:
             logger.warning(f"Failed to parse cache response: {e}")
             return None
 
-    def _extract_stems_urls(self, result_data: Dict[str, Any]) -> Dict[str, str]:
+    def _extract_stems_urls(self, result_data: dict[str, Any]) -> dict[str, str]:
         stems_urls = result_data.get("stems_urls")
         if isinstance(stems_urls, dict):
             return {
@@ -232,7 +229,7 @@ class AudioCache:
         except RuntimeError as e:
             logger.error(f"Failed to mark processing for {cache_key}: {e}")
 
-    async def get_cached_or_processing(self, search_query: str) -> Dict[str, Any] | None:
+    async def get_cached_or_processing(self, search_query: str) -> dict[str, Any] | None:
         cache_key = self._generate_cache_key(search_query)
         logger.debug(f"Cache lookup for query: {search_query[:50]} -> key: {cache_key}")
 
@@ -291,13 +288,13 @@ class AudioCache:
         return cache_key
 
     async def cache_completed_result(
-        self, cache_key: str, search_query: str, result: Dict[str, Any]
+        self, cache_key: str, search_query: str, result: AudioProcessResult
     ) -> None:
         """Cache the completed processing result"""
         try:
             audio_result = AudioResult(
                 track_id=result["track_id"],
-                stems_urls=result["stems_urls"],
+                stems_urls=result.get("stems_urls", {}),
                 processing_time=result.get("processing_time", 0.0),
                 created_at=result.get("created_at", time.time()),
             )

@@ -22,15 +22,25 @@ class AudioCacheConfig:
 
 
 @dataclass(frozen=True)
+class WebhookConfig:
+    url: str
+    secret: str
+
+
+@dataclass(frozen=True)
+class DirectoryConfig:
+    models: str
+    working: str
+
+
+@dataclass(frozen=True)
 class ProcessingJobRequest:
     track_id: str
     search_query: str
     max_file_size_mb: int
-    processing_timeout: Optional[int]
-    webhook_url: str
-    webhook_secret: str
+    processing_timeout: int | None
     cache_key: str
     storage_config: StorageConfig
-    models_dir: str
-    working_dir: str
-    cache_manager_config: Optional[AudioCacheConfig] = None
+    webhook_config: WebhookConfig
+    directory_config: DirectoryConfig
+    cache_manager_config: AudioCacheConfig | None = None

@@ -12,7 +12,14 @@ from config.constants import (
 )
 from config.logger import get_logger
 from models.job import JobStatus
-from models.request import AudioCacheConfig, ProcessingJobRequest, RedisConfig, StorageConfig
+from models.request import (
+    AudioCacheConfig,
+    DirectoryConfig,
+    ProcessingJobRequest,
+    RedisConfig,
+    StorageConfig,
+    WebhookConfig,
+)
 from services.audio_cache import AudioCache
 from services.dependencies import CacheManagerDep, QueueManagerDep, RateLimiterDep
 from utils.rate_limiter import RateLimiter, parse_rate_limit
@@ -187,12 +194,10 @@ def register_routes(app: FastAPI, config, storage):
             search_query=search_query,
             max_file_size_mb=config.max_file_size_mb,
             processing_timeout=config.processing_timeout,
-            webhook_url=config.webhook_url,
-            webhook_secret=config.webhook_secret,
             cache_key=cache_key,
             storage_config=storage_config,
-            models_dir=config.models_dir,
-            working_dir=config.working_dir,
+            webhook_config=WebhookConfig(url=config.webhook_url, secret=config.webhook_secret),
+            directory_config=DirectoryConfig(models=config.models_dir, working=config.working_dir),
             cache_manager_config=cache_manager_config,
         )
 

@@ -9,12 +9,12 @@ from config.constants import WEBHOOK_RETRY_BASE_DELAY, WEBHOOK_RETRY_MAX_ATTEMPT
 from config.logger import get_logger
 from models.job import JobStatus
 from models.request import ProcessingJobRequest
-from services.audio_processor import AudioProcessor
 from services.audio_cache import AudioCache
+from services.audio_processor import AudioProcessor
 from services.storage import get_storage_client
 from utils.redis_cache import RedisCache
-from workers.globals import get_global_separator_provider
 from utils.webhook import generate_webhook_signature
+from workers.globals import get_global_separator_provider
 
 logger = get_logger(__name__)
 
@@ -83,8 +83,8 @@ def process_audio_job(job_request: ProcessingJobRequest) -> Dict[str, Any]:
         global_separator = get_global_separator_provider()
         audio_processor = AudioProcessor(
             storage,
-            models_dir=job_request.models_dir,
-            working_dir=job_request.working_dir,
+            models_dir=job_request.directory_config.models,
+            working_dir=job_request.directory_config.working,
             separator_provider=global_separator,
         )
 
@@ -131,10 +131,12 @@ def process_audio_job(job_request: ProcessingJobRequest) -> Dict[str, Any]:
             except (RuntimeError, httpx.RequestError, httpx.HTTPStatusError) as e:
                 logger.error(f"Failed to cache result: {e}")
 
-        if job_request.webhook_url:
+        if job_request.webhook_config.url:
             asyncio.run(
                 send_webhook_notification(
-                    job_request.webhook_url, success_payload, job_request.webhook_secret
+                    job_request.webhook_config.url,
+                    success_payload,
+                    job_request.webhook_config.secret,
                 )
             )
 
@@ -145,7 +147,14 @@ def process_audio_job(job_request: ProcessingJobRequest) -> Dict[str, Any]:
     # - RuntimeError: separation failures, YouTube errors, storage errors
     # - OSError/FileNotFoundError: filesystem issues, missing audio files
     # - ValueError: invalid file sizes, unsupported formats, empty files
-    except (ConnectionError, TimeoutError, RuntimeError, OSError, FileNotFoundError, ValueError) as e:
+    except (
+        ConnectionError,
+        TimeoutError,
+        RuntimeError,
+        OSError,
+        FileNotFoundError,
+        ValueError,
+    ) as e:
         error_msg = str(e)
         logger.error(
             "Audio processing failed", track_id=job_request.track_id, error=error_msg, exc_info=True
@@ -159,10 +168,12 @@ def process_audio_job(job_request: ProcessingJobRequest) -> Dict[str, Any]:
             "track_id": job_request.track_id,
         }
 
-        if job_request.webhook_url:
+        if job_request.webhook_config.url:
             asyncio.run(
                 send_webhook_notification(
-                    job_request.webhook_url, failure_payload, job_request.webhook_secret
+                    job_request.webhook_config.url,
+                    failure_payload,
+                    job_request.webhook_config.secret,
                 )
             )
 

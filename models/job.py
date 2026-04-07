@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class JobStatus(Enum):
@@ -15,6 +15,6 @@ class ProcessingJob:
     status: JobStatus
     progress: int = 0
     created_at: float = 0
-    error: Optional[str] = None
-    result: Optional[Dict[str, Any]] = None
-    completed_at: Optional[float] = None
+    error: str | None = None
+    result: dict[str, Any] | None = None
+    completed_at: float | None = None
