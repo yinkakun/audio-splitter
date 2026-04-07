@@ -49,3 +49,37 @@ class RedisCache:
         except (redis.RedisError, ConnectionError) as e:
             logger.warning(f"Redis put failed for key {key}: {e}")
             return False
+
+    async def delete_pattern(self, pattern: str) -> int:
+        """Delete all keys matching the given pattern. Returns count of deleted keys."""
+        try:
+            client = await self._ensure_connection()
+            deleted_count = 0
+            cursor = 0
+            while True:
+                cursor, keys = await client.scan(cursor, match=pattern, count=100)
+                if keys:
+                    deleted_count += await client.delete(*keys)
+                if cursor == 0:
+                    break
+            logger.info("Deleted %d keys matching pattern: %s", deleted_count, pattern)
+            return deleted_count
+        except (redis.RedisError, ConnectionError) as e:
+            logger.warning("Redis delete pattern failed for %s: %s", pattern, e)
+            return 0
+
+    async def count_keys(self, pattern: str) -> int:
+        """Count keys matching the given pattern."""
+        try:
+            client = await self._ensure_connection()
+            count = 0
+            cursor = 0
+            while True:
+                cursor, keys = await client.scan(cursor, match=pattern, count=100)
+                count += len(keys)
+                if cursor == 0:
+                    break
+            return count
+        except (redis.RedisError, ConnectionError) as e:
+            logger.warning("Redis count keys failed for %s: %s", pattern, e)
+            return 0

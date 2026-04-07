@@ -73,6 +73,15 @@ class HealthResponse(BaseModel):
     services: Dict[str, bool]
 
 
+class CacheStatsResponse(BaseModel):
+    total_entries: int
+
+
+class CacheClearResponse(BaseModel):
+    deleted_count: int
+    message: str
+
+
 def register_error_handlers(app: FastAPI):
     @app.middleware("http")
     async def add_security_headers(request: Request, call_next):
@@ -307,4 +316,55 @@ def register_routes(app: FastAPI, config, storage):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve queue information",
+            ) from e
+
+    @app.get("/cache/stats", response_model=CacheStatsResponse)
+    async def get_cache_stats(
+        request: Request,
+        cache_manager: AudioCache | None = CacheManagerDep,
+    ):
+        """Get cache statistics."""
+        await _verify_api_key(request)
+
+        if not cache_manager:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cache unavailable - Redis not configured",
+            )
+
+        try:
+            stats = await cache_manager.get_cache_stats()
+            return CacheStatsResponse(**stats)
+        except Exception as e:
+            logger.error("Failed to get cache stats: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to retrieve cache statistics",
+            ) from e
+
+    @app.delete("/cache", response_model=CacheClearResponse)
+    async def clear_cache(
+        request: Request,
+        cache_manager: AudioCache | None = CacheManagerDep,
+    ):
+        """Clear all audio cache entries."""
+        await _verify_api_key(request)
+
+        if not cache_manager:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cache unavailable - Redis not configured",
+            )
+
+        try:
+            deleted_count = await cache_manager.clear_all_cache()
+            return CacheClearResponse(
+                deleted_count=deleted_count,
+                message=f"Successfully cleared {deleted_count} cache entries",
+            )
+        except Exception as e:
+            logger.error("Failed to clear cache: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to clear cache",
             ) from e

@@ -16,6 +16,8 @@ logger = get_logger(__name__)
 class CacheProtocol(Protocol):
     async def get_key(self, key: str) -> dict | None: ...
     async def put_key(self, key: str, value: dict[str, Any], ttl: int | None = None) -> bool: ...
+    async def delete_pattern(self, pattern: str) -> int: ...
+    async def count_keys(self, pattern: str) -> int: ...
 
 
 @dataclass
@@ -375,3 +377,14 @@ class AudioCache:
 
         except KeyError as e:
             logger.error(f"Missing required key in result data: {e}")
+
+    async def clear_all_cache(self) -> int:
+        """Clear all audio cache entries. Returns count of deleted entries."""
+        deleted_count = await self.cache.delete_pattern("audio:*")
+        logger.info("Cleared %d audio cache entries", deleted_count)
+        return deleted_count
+
+    async def get_cache_stats(self) -> dict[str, int]:
+        """Get cache statistics."""
+        count = await self.cache.count_keys("audio:*")
+        return {"total_entries": count}
