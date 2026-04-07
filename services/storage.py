@@ -1,6 +1,7 @@
 import asyncio
+import mimetypes
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 import aioboto3
 import boto3
@@ -9,7 +10,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from pydantic import BaseModel
 
 from config.logger import get_logger
-from services.audio_classifier import AudioClassifier, AudioType
+from services.audio_classifier import AudioClassifier
 
 logger = get_logger(__name__)
 
@@ -83,12 +84,20 @@ class CloudflareR2:
     async def close(self) -> None:
         logger.debug("R2Storage closed")
 
+    @staticmethod
+    def _get_content_type(file_path: Path) -> str:
+        content_type, _ = mimetypes.guess_type(file_path.name)
+        return content_type or "application/octet-stream"
+
     def upload_file(self, file_path: Path, key: str) -> bool:
         if not self.client:
             return False
         try:
             self.client.upload_file(
-                str(file_path), self.bucket_name, key, ExtraArgs={"ContentType": "audio/mpeg"}
+                str(file_path),
+                self.bucket_name,
+                key,
+                ExtraArgs={"ContentType": self._get_content_type(file_path)},
             )
             logger.info("Uploaded %s to R2 as %s", file_path, key)
             return True
@@ -136,7 +145,10 @@ class CloudflareR2:
                 config=self._config,
             ) as client:
                 await client.upload_file(
-                    str(file_path), self.bucket_name, key, ExtraArgs={"ContentType": "audio/mpeg"}
+                    str(file_path),
+                    self.bucket_name,
+                    key,
+                    ExtraArgs={"ContentType": self._get_content_type(file_path)},
                 )
                 logger.info("Uploaded %s to R2 as %s (async)", file_path, key)
                 return True
@@ -179,45 +191,74 @@ class CloudflareR2:
 
     def cleanup_track_files(self, track_id: str):
         try:
-            for track_type in AudioType:
-                r2_key = AudioClassifier.get_track_filename(track_id, track_type)
+            response = self.client.list_objects_v2(Bucket=self.bucket_name, Prefix=f"{track_id}/")
+            for item in response.get("Contents", []):
+                r2_key = item["Key"]
                 try:
                     if self.delete_file(r2_key):
                         logger.debug("Cleaned up R2 file: %s", r2_key)
                 except (ClientError, NoCredentialsError, OSError) as e:
                     logger.warning("Failed to clean up R2 file %s: %s", r2_key, e)
-        except (TypeError, ValueError, AttributeError) as e:
+        except (TypeError, ValueError, AttributeError, ClientError, NoCredentialsError) as e:
             logger.error("Unexpected error during cleanup for %s: %s", track_id, e)
 
     @staticmethod
-    def detect_separated_files(output_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
-        return AudioClassifier.detect_separated_files(output_dir)
+    def detect_stem_files(output_dir: Path) -> dict[str, Path]:
+        return AudioClassifier.detect_stem_files(output_dir)
 
-    def upload_track_files(self, track_id: str, vocals_file: Path, instrumental_file: Path) -> bool:
+    def _rollback_uploaded_keys(self, uploaded_keys: dict[str, str]) -> None:
+        """Delete already-uploaded files during a failed batch upload."""
+        for stem_name, stem_key in uploaded_keys.items():
+            try:
+                if self.delete_file(stem_key):
+                    logger.debug("Rolled back uploaded file: %s", stem_key)
+            except (ClientError, NoCredentialsError, OSError) as e:
+                logger.warning("Failed to rollback file %s: %s", stem_key, e)
+
+    def upload_stem_files(self, track_id: str, stem_files: dict[str, Path]) -> dict[str, str]:
+        uploaded_keys: dict[str, str] = {}
         try:
-            vocals_key = f"{track_id}/vocals.mp3"
-            instrumental_key = f"{track_id}/instrumental.mp3"
-
-            vocals_uploaded = self.upload_file(vocals_file, vocals_key)
-            instrumental_uploaded = self.upload_file(instrumental_file, instrumental_key)
-
-            return vocals_uploaded and instrumental_uploaded
+            for stem_name, stem_file in stem_files.items():
+                stem_key = f"{track_id}/stems/{stem_name}{stem_file.suffix.lower()}"
+                if not self.upload_file(stem_file, stem_key):
+                    logger.error("Upload failed for %s, rolling back %d files", stem_key, len(uploaded_keys))
+                    self._rollback_uploaded_keys(uploaded_keys)
+                    return {}
+                uploaded_keys[stem_name] = stem_key
+            return uploaded_keys
         except (ClientError, NoCredentialsError) as e:
-            logger.error("Failed to upload track files to R2: %s", e)
-            return False
+            logger.error("Failed to upload stem files to R2: %s", e)
+            self._rollback_uploaded_keys(uploaded_keys)
+            return {}
 
-    async def upload_track_files_async(
-        self, track_id: str, vocals_file: Path, instrumental_file: Path
-    ) -> bool:
+    async def upload_stem_files_async(self, track_id: str, stem_files: dict[str, Path]) -> dict[str, str]:
         try:
-            vocals_key = f"{track_id}/vocals.mp3"
-            instrumental_key = f"{track_id}/instrumental.mp3"
-
-            file_uploads = [(vocals_file, vocals_key), (instrumental_file, instrumental_key)]
+            file_uploads = [
+                (stem_file, f"{track_id}/stems/{stem_name}{stem_file.suffix.lower()}")
+                for stem_name, stem_file in stem_files.items()
+            ]
 
             upload_results = await self.upload_files_parallel(file_uploads)
-            return all(upload_results)
+            uploaded_keys = {
+                stem_name: f"{track_id}/stems/{stem_name}{stem_file.suffix.lower()}"
+                for stem_name, stem_file in stem_files.items()
+            }
+            if not all(upload_results):
+                # Rollback successfully uploaded files
+                successful_keys = {
+                    stem_name: key
+                    for (stem_name, _), success, key in zip(
+                        stem_files.items(), upload_results, uploaded_keys.values()
+                    )
+                    if success
+                }
+                logger.error(
+                    "Partial upload failure, rolling back %d files", len(successful_keys)
+                )
+                self._rollback_uploaded_keys(successful_keys)
+                return {}
+            return uploaded_keys
 
         except (ClientError, NoCredentialsError) as e:
             logger.error("Failed to upload track files to R2 (async): %s", e)
-            return False
+            return {}

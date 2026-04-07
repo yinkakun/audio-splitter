@@ -1,15 +1,16 @@
+import asyncio
 import hashlib
 import json
 import re
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol
+from urllib.parse import urlparse
 
 from config.constants import (
     CACHE_TTL_SECONDS,
     PROCESSING_TTL_SECONDS,
     CACHE_CLEANUP_TTL_SECONDS,
-    URL_PATH_SEGMENTS_TO_EXTRACT,
 )
 from config.logger import get_logger
 
@@ -24,18 +25,19 @@ class CacheProtocol(Protocol):
 @dataclass
 class AudioResult:
     track_id: str
-    vocals_url: str
+    stems_urls: Dict[str, str]
     created_at: float
-    instrumental_url: str
     processing_time: float
 
-    def get_storage_paths(self) -> tuple[str, str]:
-        """Extract storage paths from URLs"""
-        vocals_path = "/".join(self.vocals_url.split("/")[-URL_PATH_SEGMENTS_TO_EXTRACT:])
-        instrumental_path = "/".join(
-            self.instrumental_url.split("/")[-URL_PATH_SEGMENTS_TO_EXTRACT:]
-        )
-        return vocals_path, instrumental_path
+    def get_storage_paths(self) -> list[str]:
+        """Extract bucket keys from public stem URLs."""
+        storage_paths: list[str] = []
+        for url in self.stems_urls.values():
+            parsed = urlparse(url)
+            storage_path = parsed.path.lstrip("/")
+            if storage_path:
+                storage_paths.append(storage_path)
+        return storage_paths
 
 
 @dataclass
@@ -93,6 +95,16 @@ class AudioCache:
             logger.error(f"Failed to parse JSON: {e}")
             return None
 
+    def _extract_stems_urls(self, result_data: Dict[str, Any]) -> Dict[str, str]:
+        stems_urls = result_data.get("stems_urls")
+        if isinstance(stems_urls, dict):
+            return {
+                stem_name: stem_url
+                for stem_name, stem_url in stems_urls.items()
+                if isinstance(stem_name, str) and isinstance(stem_url, str)
+            }
+        return {}
+
     async def _get_cache_entry(self, cache_key: str) -> Optional[CacheEntry]:
         try:
             raw_data = await self.cache.get_key(f"audio:{cache_key}")
@@ -114,9 +126,8 @@ class AudioCache:
 
             if data["status"] == "processing":
                 result = AudioResult(
-                    vocals_url="",
-                    instrumental_url="",
                     processing_time=0.0,
+                    stems_urls={},
                     track_id=data.get("track_id", ""),
                     created_at=data.get("created_at", time.time()),
                 )
@@ -131,12 +142,17 @@ class AudioCache:
                 )
 
             if data["status"] == "completed" and "result" in data:
+                result_data = data["result"]
+                stems_urls = self._extract_stems_urls(result_data)
+                if not stems_urls:
+                    logger.warning(f"Completed cache entry missing stems for {cache_key}")
+                    return None
+
                 result = AudioResult(
-                    vocals_url=data["result"]["vocals_url"],
-                    created_at=data["result"]["created_at"],
-                    processing_time=data["result"]["processing_time"],
-                    instrumental_url=data["result"]["instrumental_url"],
-                    track_id=data.get("track_id", data["result"].get("track_id", "")),
+                    created_at=result_data["created_at"],
+                    processing_time=result_data["processing_time"],
+                    stems_urls=stems_urls,
+                    track_id=data.get("track_id", result_data.get("track_id", "")),
                 )
 
                 return CacheEntry(
@@ -145,7 +161,7 @@ class AudioCache:
                     search_query=data.get("search_query", ""),
                     created_at=data.get("created_at", time.time()),
                     last_accessed=data.get("last_accessed", data.get("created_at", time.time())),
-                    processing_time=data.get("processing_time", data["result"]["processing_time"]),
+                    processing_time=data.get("processing_time", result_data["processing_time"]),
                 )
 
             logger.warning(f"Invalid cache entry structure for {cache_key}: {data}")
@@ -178,12 +194,13 @@ class AudioCache:
 
     async def _files_exist(self, result: AudioResult) -> bool:
         try:
-            vocals_path, instrumental_path = result.get_storage_paths()
-
-            vocals_exists = await self.storage.file_exists_async(vocals_path)
-            instrumentals_exists = await self.storage.file_exists_async(instrumental_path)
-
-            return vocals_exists and instrumentals_exists
+            stem_paths = result.get_storage_paths()
+            if not stem_paths:
+                return False
+            file_checks = await asyncio.gather(
+                *(self.storage.file_exists_async(stem_path) for stem_path in stem_paths)
+            )
+            return all(file_checks)
         except RuntimeError as e:
             logger.warning(f"Error checking file existence: {e}")
             return False
@@ -198,8 +215,7 @@ class AudioCache:
                 "processing_time": result.processing_time,
                 "result": {
                     "track_id": result.track_id,
-                    "vocals_url": result.vocals_url,
-                    "instrumental_url": result.instrumental_url,
+                    "stems_urls": result.stems_urls,
                     "processing_time": result.processing_time,
                     "created_at": result.created_at,
                 },
@@ -244,8 +260,7 @@ class AudioCache:
                     "status": "completed",
                     "track_id": cached.result.track_id,
                     "result": {
-                        "vocals_url": cached.result.vocals_url,
-                        "instrumental_url": cached.result.instrumental_url,
+                        "stems_urls": cached.result.stems_urls,
                         "track_id": cached.result.track_id,
                     },
                     "processing_time": cached.result.processing_time,
@@ -292,8 +307,7 @@ class AudioCache:
         try:
             audio_result = AudioResult(
                 track_id=result["track_id"],
-                vocals_url=result["vocals_url"],
-                instrumental_url=result["instrumental_url"],
+                stems_urls=result["stems_urls"],
                 processing_time=result.get("processing_time", 0.0),
                 created_at=result.get("created_at", time.time()),
             )

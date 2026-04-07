@@ -1,6 +1,6 @@
 # YouTube Audio Separator
 
-FastAPI service that separates YouTube audio into vocals and instrumental tracks.
+FastAPI service that separates YouTube audio into stem tracks.
 
 ## Setup
 

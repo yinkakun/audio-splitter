@@ -76,7 +76,7 @@ def create_base_app(config) -> FastAPI:
     return FastAPI(
         version="1.0.0",
         title="YouTube Audio Separator API",
-        description="API for separating vocals and instrumentals from YouTube audio",
+        description="API for separating YouTube audio into stems",
         docs_url="/docs" if config.debug else None,
         redoc_url="/redoc" if config.debug else None,
     )
