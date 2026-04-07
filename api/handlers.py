@@ -1,3 +1,4 @@
+import re
 import time
 import uuid as uuid_module
 from typing import Dict
@@ -53,8 +54,6 @@ class SeparationRequest(BaseModel):
     @field_validator("youtube_url")
     @classmethod
     def validate_youtube_url(cls, v):
-        import re
-
         sanitized = sanitize_input(v, 200)
         # Match youtube.com/watch?v=, youtu.be/, and youtube.com/shorts/ URLs
         youtube_pattern = r"^(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+"
@@ -110,7 +109,7 @@ def register_routes(app: FastAPI, config, storage):
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        token = authorization.replace("Bearer ", "")
+        token = authorization.removeprefix("Bearer ")
         if not token or token != config.api_secret_key:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -119,7 +118,7 @@ def register_routes(app: FastAPI, config, storage):
             )
 
     async def _apply_rate_limit(
-        request: Request, rate_limit: str, rate_limiter: RateLimiter | None = RateLimiterDep
+        request: Request, rate_limit: str, rate_limiter: RateLimiter | None = None
     ):
         if not rate_limiter:
             return
@@ -135,7 +134,7 @@ def register_routes(app: FastAPI, config, storage):
         allowed, info = await rate_limiter.is_allowed(client_ip, limit_requests, window_seconds)
 
         if not allowed:
-            logger.warning(f"Rate limit exceeded for {client_ip}: {rate_limit}")
+            logger.warning("Rate limit exceeded for %s: %s", client_ip, rate_limit)
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail={
@@ -154,10 +153,11 @@ def register_routes(app: FastAPI, config, storage):
         separation_request: SeparationRequest,
         queue_manager: JobQueue | None = QueueManagerDep,
         cache_manager: AudioCache | None = CacheManagerDep,
+        rate_limiter: RateLimiter | None = RateLimiterDep,
     ):
         await _verify_api_key(request)
 
-        await _apply_rate_limit(request, config.rate_limit_requests)
+        await _apply_rate_limit(request, config.rate_limit_requests, rate_limiter)
         try:
             youtube_url = sanitize_input(
                 separation_request.youtube_url,
@@ -176,7 +176,7 @@ def register_routes(app: FastAPI, config, storage):
                 # Add this request as a subscriber if URL is still processing
                 if cached_result.get("status") == "processing":
                     await cache_manager.add_subscriber(youtube_url, request_id)
-                logger.info(f"Returning cached/processing result for: {youtube_url[:50]}")
+                logger.info("Returning cached/processing result for: %s", youtube_url[:50])
                 return cached_result
 
         track_id = str(uuid_module.uuid4())
@@ -246,7 +246,6 @@ def register_routes(app: FastAPI, config, storage):
             await storage.file_exists_async("_health_check")
             health_status["services"]["storage_operational"] = True
         except (ConnectionError, TimeoutError, OSError) as e:
-            health_status["services"]["storage_operational"] = False
             logger.error("Storage health check failed: %s", e)
 
         if rate_limiter:
@@ -259,7 +258,6 @@ def register_routes(app: FastAPI, config, storage):
                 )
                 health_status["services"]["rate_limiting_operational"] = True
             except (ConnectionError, TimeoutError, OSError) as e:
-                health_status["services"]["rate_limiting_operational"] = False
                 logger.error("Redis rate limiter health check failed: %s", e)
 
         return HealthResponse(**health_status)
@@ -285,7 +283,7 @@ def register_routes(app: FastAPI, config, storage):
             job_status = queue_manager.get_job_status(track_id)
             return job_status
         except Exception as e:
-            logger.error(f"Failed to get job status for {track_id}: {e}")
+            logger.error("Failed to get job status for %s: %s", track_id, e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve job status",
@@ -305,7 +303,7 @@ def register_routes(app: FastAPI, config, storage):
             queue_info = queue_manager.get_queue_info()
             return queue_info
         except Exception as e:
-            logger.error(f"Failed to get queue info: {e}")
+            logger.error("Failed to get queue info: %s", e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve queue information",
