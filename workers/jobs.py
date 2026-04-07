@@ -64,7 +64,7 @@ async def send_webhook_notification(
                         callback_url=callback_url,
                         error=str(e),
                     )
-                    time.sleep(retry_base_delay**attempt)
+                    await asyncio.sleep(retry_base_delay**attempt)
 
 
 def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
