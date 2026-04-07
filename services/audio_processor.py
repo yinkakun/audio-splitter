@@ -42,10 +42,6 @@ class YtDlpEntry(TypedDict, total=False):
     url: str
 
 
-class YtDlpSearchResult(TypedDict, total=False):
-    entries: Required[list[YtDlpEntry]]
-
-
 class AudioProcessResult(TypedDict, total=False):
     original_title: str
     track_id: Required[str]
@@ -271,13 +267,13 @@ class AudioProcessor:
         self,
         job_dir: Path,
         track_id: str,
-        search_query: str,
+        youtube_url: str,
         max_file_size_mb: int,
         processing_timeout: int | None = None,
     ) -> tuple[dict[str, Path], str]:
-        logger.info("Downloading audio", track_id=track_id, query=search_query)
+        logger.info("Downloading audio", track_id=track_id, youtube_url=youtube_url)
         downloaded_file, original_title = self.download_audio(
-            job_dir, search_query, max_file_size_mb
+            job_dir, youtube_url, max_file_size_mb
         )
 
         logger.info("Separating audio", track_id=track_id)
@@ -309,7 +305,7 @@ class AudioProcessor:
     def process_audio(
         self,
         track_id: str,
-        search_query: str,
+        youtube_url: str,
         max_file_size_mb: int,
         processing_timeout: int | None = None,
     ) -> AudioProcessResult:
@@ -321,7 +317,7 @@ class AudioProcessor:
             stem_files, original_title = self._process_audio_files(
                 job_dir,
                 track_id,
-                search_query,
+                youtube_url,
                 max_file_size_mb,
                 processing_timeout,
             )
@@ -335,7 +331,7 @@ class AudioProcessor:
 
         except (RuntimeError, OSError, FileNotFoundError, ValueError, TimeoutError) as e:
             logger.error(
-                "Audio processing failed", track_id=track_id, error=str(e), query=search_query
+                "Audio processing failed", track_id=track_id, error=str(e), youtube_url=youtube_url
             )
             self.storage.cleanup_track_files(track_id)
             raise
@@ -365,12 +361,6 @@ class AudioProcessor:
         result["storage"] = "r2"
         return result
 
-    def _validate_search_results(self, search_results: YtDlpSearchResult) -> YtDlpEntry:
-        entries = search_results.get("entries")
-        if not entries:
-            raise RuntimeError("No search results found")
-        return entries[0]
-
     def _validate_entry_file_size(self, entry: YtDlpEntry, max_file_size_mb: int) -> None:
         filesize = entry.get("filesize")
         if filesize:
@@ -386,22 +376,19 @@ class AudioProcessor:
         return title_value if isinstance(title_value, str) else "Unknown Title"
 
     def download_audio(
-        self, job_dir: Path, search_query: str, max_file_size_mb: int
+        self, job_dir: Path, youtube_url: str, max_file_size_mb: int
     ) -> tuple[Path, str | None]:
         def _download():
-            search_term = f"ytsearch1:{search_query}"
-
             # First pass: extract info to validate file size before downloading
             with yt_dlp.YoutubeDL(
                 {**BASE_YDL_OPTS, "format": "bestaudio/best"}
             ) as ydl:  # pyright: ignore[reportArgumentType]
-                search_results = ydl.extract_info(search_term, download=False)
-                if not search_results:
-                    raise RuntimeError("No search results found")
-                first_entry = self._validate_search_results(cast(YtDlpSearchResult, search_results))
-                self._validate_entry_file_size(first_entry, max_file_size_mb)
-                video_url = first_entry.get("webpage_url") or first_entry.get("url")
-                original_title = self._extract_title_from_entry(first_entry)
+                video_info = ydl.extract_info(youtube_url, download=False)
+                if not video_info:
+                    raise RuntimeError("Could not extract video info from URL")
+                video_info = cast(YtDlpEntry, video_info)
+                self._validate_entry_file_size(video_info, max_file_size_mb)
+                original_title = self._extract_title_from_entry(video_info)
 
             # Second pass: download the validated video
             download_opts: YoutubeDLOpts = {
@@ -410,7 +397,7 @@ class AudioProcessor:
                 "outtmpl": str(job_dir / "original.%(ext)s"),
             }
             with yt_dlp.YoutubeDL(download_opts) as ydl:  # pyright: ignore[reportArgumentType]
-                ydl.download([video_url or search_term])
+                ydl.download([youtube_url])
 
             for file_path in job_dir.iterdir():
                 if file_path.name.startswith("original."):

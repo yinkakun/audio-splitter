@@ -46,7 +46,7 @@ class AudioResult:
 @dataclass
 class CacheEntry:
     status: str
-    search_query: str
+    youtube_url: str
     created_at: float
     last_accessed: float
     processing_time: float
@@ -67,19 +67,18 @@ class AudioCache:
         self.processing_ttl = ttl.processing
         self.cache_cleanup_ttl = ttl.cleanup
 
-    def _normalize_search_query(self, search_query: str) -> str:
-        normalized = search_query.lower().strip()
+    def _extract_video_id(self, youtube_url: str) -> str:
+        """Extract video ID from various YouTube URL formats."""
+        # Match youtube.com/watch?v=VIDEO_ID
+        match = re.search(r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)([\w-]+)", youtube_url)
+        if match:
+            return match.group(1)
+        # Fallback: use the full URL
+        return youtube_url.lower().strip()
 
-        normalized = re.sub(r"\s+", " ", normalized)
-
-        normalized = re.sub(r"\b(official|video|lyric|lyrics|karaoke)\b", "", normalized)
-        normalized = re.sub(r"\s+", " ", normalized).strip()
-
-        return normalized
-
-    def _generate_cache_key(self, search_query: str) -> str:
-        normalized = self._normalize_search_query(search_query)
-        hash_digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    def _generate_cache_key(self, youtube_url: str) -> str:
+        video_id = self._extract_video_id(youtube_url)
+        hash_digest = hashlib.sha256(video_id.encode("utf-8")).hexdigest()
         return hash_digest[:32]
 
     def _parse_cache_response(self, raw_data: Any) -> dict[str, Any] | None:
@@ -136,7 +135,7 @@ class AudioCache:
                     result=result,
                     processing_time=0.0,
                     status=data["status"],
-                    search_query=data.get("search_query", ""),
+                    youtube_url=data.get("youtube_url", data.get("search_query", "")),
                     created_at=data.get("created_at", time.time()),
                     last_accessed=data.get("last_accessed", data.get("created_at", time.time())),
                 )
@@ -158,7 +157,7 @@ class AudioCache:
                 return CacheEntry(
                     result=result,
                     status=data["status"],
-                    search_query=data.get("search_query", ""),
+                    youtube_url=data.get("youtube_url", data.get("search_query", "")),
                     created_at=data.get("created_at", time.time()),
                     last_accessed=data.get("last_accessed", data.get("created_at", time.time())),
                     processing_time=data.get("processing_time", result_data["processing_time"]),
@@ -205,11 +204,11 @@ class AudioCache:
             logger.warning(f"Error checking file existence: {e}")
             return False
 
-    async def _cache_result(self, cache_key: str, search_query: str, result: AudioResult) -> None:
+    async def _cache_result(self, cache_key: str, youtube_url: str, result: AudioResult) -> None:
         try:
             cache_data = {
                 "status": "completed",
-                "search_query": search_query,
+                "youtube_url": youtube_url,
                 "created_at": result.created_at,
                 "last_accessed": time.time(),
                 "processing_time": result.processing_time,
@@ -222,15 +221,15 @@ class AudioCache:
             }
 
             await self.cache.put_key(f"audio:{cache_key}", cache_data, ttl=self.cache_ttl)
-            logger.info(f"Cached audio result for query: {search_query[:50]}")
+            logger.info(f"Cached audio result for URL: {youtube_url[:50]}")
         except RuntimeError as e:
             logger.error(f"Failed to cache result for {cache_key}: {e}")
 
-    async def _mark_processing(self, cache_key: str, search_query: str, track_id: str) -> None:
+    async def _mark_processing(self, cache_key: str, youtube_url: str, track_id: str) -> None:
         try:
             processing_data = {
                 "status": "processing",
-                "search_query": search_query,
+                "youtube_url": youtube_url,
                 "track_id": track_id,
                 "created_at": time.time(),
                 "last_accessed": time.time(),
@@ -242,19 +241,19 @@ class AudioCache:
         except RuntimeError as e:
             logger.error(f"Failed to mark processing for {cache_key}: {e}")
 
-    async def get_cached_or_processing(self, search_query: str) -> dict[str, Any] | None:
-        cache_key = self._generate_cache_key(search_query)
-        logger.debug(f"Cache lookup for query: {search_query[:50]} -> key: {cache_key}")
+    async def get_cached_or_processing(self, youtube_url: str) -> dict[str, Any] | None:
+        cache_key = self._generate_cache_key(youtube_url)
+        logger.debug(f"Cache lookup for URL: {youtube_url[:50]} -> key: {cache_key}")
 
         cached = await self._get_cache_entry(cache_key)
         if not cached:
-            logger.debug(f"No cache entry found for: {search_query[:50]}")
+            logger.debug(f"No cache entry found for: {youtube_url[:50]}")
             return None
 
         if cached.status == "completed":
             if await self._files_exist(cached.result):
                 await self._update_access_time(cache_key)
-                logger.info(f"Cache hit for query: {search_query[:50]}")
+                logger.info(f"Cache hit for URL: {youtube_url[:50]}")
 
                 return {
                     "status": "completed",
@@ -268,23 +267,23 @@ class AudioCache:
                     "cached": True,
                 }
 
-            logger.warning(f"Cache entry exists but files missing for: {search_query[:50]}")
+            logger.warning(f"Cache entry exists but files missing for: {youtube_url[:50]}")
             await self._remove_cache_entry(cache_key)
             return None
 
         if cached.status == "processing":
             if time.time() - cached.created_at < self.processing_ttl:
-                logger.info(f"Request already processing for: {search_query[:50]}")
+                logger.info(f"Request already processing for: {youtube_url[:50]}")
                 return {
                     "status": "processing",
                     "track_id": cached.result.track_id if cached.result.track_id else "unknown",
                     "message": "Audio separation already in progress",
                 }
-            logger.info(f"Processing entry expired for: {search_query[:50]}")
+            logger.info(f"Processing entry expired for: {youtube_url[:50]}")
             await self._remove_cache_entry(cache_key)
             return None
 
-        logger.warning(f"Unknown cache status '{cached.status}' for: {search_query[:50]}")
+        logger.warning(f"Unknown cache status '{cached.status}' for: {youtube_url[:50]}")
         return None
 
     async def _remove_cache_entry(self, cache_key: str) -> None:
@@ -295,13 +294,13 @@ class AudioCache:
         except RuntimeError as e:
             logger.warning(f"Failed to remove cache entry {cache_key}: {e}")
 
-    async def mark_processing_start(self, search_query: str, track_id: str) -> str:
-        cache_key = self._generate_cache_key(search_query)
-        await self._mark_processing(cache_key, search_query, track_id)
+    async def mark_processing_start(self, youtube_url: str, track_id: str) -> str:
+        cache_key = self._generate_cache_key(youtube_url)
+        await self._mark_processing(cache_key, youtube_url, track_id)
         return cache_key
 
     async def cache_completed_result(
-        self, cache_key: str, search_query: str, result: AudioProcessResult
+        self, cache_key: str, youtube_url: str, result: AudioProcessResult
     ) -> None:
         """Cache the completed processing result"""
         try:
@@ -312,8 +311,8 @@ class AudioCache:
                 created_at=result.get("created_at", time.time()),
             )
 
-            await self._cache_result(cache_key, search_query, audio_result)
-            logger.info(f"Cached completed result for: {search_query[:50]}")
+            await self._cache_result(cache_key, youtube_url, audio_result)
+            logger.info(f"Cached completed result for: {youtube_url[:50]}")
 
         except KeyError as e:
             logger.error(f"Missing required key in result data: {e}")

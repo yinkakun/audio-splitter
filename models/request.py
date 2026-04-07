@@ -36,7 +36,7 @@ class DirectoryConfig:
 @dataclass(frozen=True)
 class ProcessingJobRequest:
     track_id: str
-    search_query: str
+    youtube_url: str
     max_file_size_mb: int
     processing_timeout: int | None
     cache_key: str

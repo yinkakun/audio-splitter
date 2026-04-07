@@ -10,7 +10,7 @@ class Config(BaseSettings):
         extra="ignore",
     )
 
-    max_search_query_length: int = 200
+    max_youtube_url_length: int = 200
     max_file_size_mb: int = 50
 
     max_workers: int = 1

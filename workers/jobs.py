@@ -102,13 +102,13 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
         logger.info(
             "Starting audio processing job",
             track_id=job_request.track_id,
-            search_query=job_request.search_query[:50]
-            + ("..." if len(job_request.search_query) > 50 else ""),
+            youtube_url=job_request.youtube_url[:50]
+            + ("..." if len(job_request.youtube_url) > 50 else ""),
         )
 
         result = audio_processor.process_audio(
             track_id=job_request.track_id,
-            search_query=job_request.search_query,
+            youtube_url=job_request.youtube_url,
             max_file_size_mb=job_request.max_file_size_mb,
             processing_timeout=job_request.processing_timeout,
         )
@@ -127,7 +127,7 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
             try:
                 asyncio.run(
                     cache_manager.cache_completed_result(
-                        job_request.cache_key, job_request.search_query, result
+                        job_request.cache_key, job_request.youtube_url, result
                     )
                 )
             except (RuntimeError, httpx.RequestError, httpx.HTTPStatusError) as e:

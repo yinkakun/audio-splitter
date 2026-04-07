@@ -47,12 +47,19 @@ def validate_track_id(track_id: str) -> bool:
 
 
 class SeparationRequest(BaseModel):
-    search_query: str = Field(..., min_length=1, max_length=200)
+    youtube_url: str = Field(..., min_length=1, max_length=200)
 
-    @field_validator("search_query")
+    @field_validator("youtube_url")
     @classmethod
-    def validate_search_query(cls, v):
-        return sanitize_input(v, 200)
+    def validate_youtube_url(cls, v):
+        import re
+
+        sanitized = sanitize_input(v, 200)
+        # Match youtube.com/watch?v=, youtu.be/, and youtube.com/shorts/ URLs
+        youtube_pattern = r"^(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+"
+        if not re.match(youtube_pattern, sanitized):
+            raise ValueError("Invalid YouTube URL format")
+        return sanitized
 
 
 class HealthResponse(BaseModel):
@@ -146,9 +153,9 @@ def register_routes(app: FastAPI, config, storage):
 
         await _apply_rate_limit(request, config.rate_limit_requests)
         try:
-            search_query = sanitize_input(
-                separation_request.search_query,
-                config.max_search_query_length,
+            youtube_url = sanitize_input(
+                separation_request.youtube_url,
+                config.max_youtube_url_length,
             )
         except ValueError as e:
             raise HTTPException(
@@ -156,9 +163,9 @@ def register_routes(app: FastAPI, config, storage):
             ) from e
 
         if cache_manager:
-            cached_result = await cache_manager.get_cached_or_processing(search_query)
+            cached_result = await cache_manager.get_cached_or_processing(youtube_url)
             if cached_result:
-                logger.info(f"Returning cached/processing result for: {search_query[:50]}")
+                logger.info(f"Returning cached/processing result for: {youtube_url[:50]}")
                 return cached_result
 
         track_id = str(uuid_module.uuid4())
@@ -171,7 +178,7 @@ def register_routes(app: FastAPI, config, storage):
 
         cache_key = ""
         if cache_manager:
-            cache_key = await cache_manager.mark_processing_start(search_query, track_id)
+            cache_key = await cache_manager.mark_processing_start(youtube_url, track_id)
 
         storage_config = StorageConfig(
             account_id=config.cloudflare_account_id,
@@ -187,7 +194,7 @@ def register_routes(app: FastAPI, config, storage):
 
         job_request = ProcessingJobRequest(
             track_id=track_id,
-            search_query=search_query,
+            youtube_url=youtube_url,
             max_file_size_mb=config.max_file_size_mb,
             processing_timeout=config.processing_timeout,
             cache_key=cache_key,
@@ -200,9 +207,9 @@ def register_routes(app: FastAPI, config, storage):
         queue_manager.enqueue_job(job_request)
 
         logger.info(
-            "Accepted job %s for search query: %s",
+            "Accepted job %s for YouTube URL: %s",
             track_id,
-            search_query[:50] + ("..." if len(search_query) > 50 else ""),
+            youtube_url[:50] + ("..." if len(youtube_url) > 50 else ""),
         )
 
         return {

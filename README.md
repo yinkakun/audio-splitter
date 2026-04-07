@@ -28,11 +28,11 @@ docker-compose up --scale worker=2
 # Start job
 curl -X POST http://localhost:5500/separate-audio \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your_api_secret_key" \
-  -d '{"search_query": "Song Title Artist"}'
+  -H "Authorization: Bearer your_api_secret_key" \
+  -d '{"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
 
 # Check status
-curl -H "X-API-Key: your_api_secret_key" \
+curl -H "Authorization: Bearer your_api_secret_key" \
   http://localhost:5500/job/your-track-id
 ```
 
@@ -49,8 +49,8 @@ curl -H "X-API-Key: your_api_secret_key" \
 ```bash
 curl -X POST http://localhost:5500/separate-audio \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your_api_secret_key" \
-  -d '{"search_query": "Song Title Artist"}'
+  -H "Authorization: Bearer your_api_secret_key" \
+  -d '{"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
 ```
 
 ### Response
