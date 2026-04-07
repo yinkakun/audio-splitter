@@ -5,9 +5,10 @@ from config.config import Config
 from config.logger import setup_logging
 from services.storage import CloudflareR2, R2Storage
 
+
 def create_app() -> FastAPI:
     config = Config()
-    config.validate_for_production()
+    config.check_r2_environment_configs()
 
     setup_logging(config.debug)
 

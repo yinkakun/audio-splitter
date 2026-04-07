@@ -1,11 +1,10 @@
 import asyncio
 import time
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 from rq import get_current_job
 
-from config.constants import WEBHOOK_RETRY_BASE_DELAY, WEBHOOK_RETRY_MAX_ATTEMPTS
 from config.logger import get_logger
 from models.job import JobStatus
 from models.request import ProcessingJobRequest
@@ -20,7 +19,11 @@ logger = get_logger(__name__)
 
 
 async def send_webhook_notification(
-    callback_url: str, payload: Dict[str, Any], webhook_secret: str = ""
+    callback_url: str,
+    payload: dict[str, Any],
+    webhook_secret: str = "",
+    max_retries: int = 3,
+    retry_base_delay: int = 2,
 ) -> None:
     if not callback_url:
         return
@@ -30,7 +33,6 @@ async def send_webhook_notification(
         signature = generate_webhook_signature(payload, webhook_secret)
         headers["X-Webhook-Signature"] = signature
 
-    max_retries = WEBHOOK_RETRY_MAX_ATTEMPTS
     async with httpx.AsyncClient() as client:
         for attempt in range(max_retries):
             try:
@@ -62,10 +64,10 @@ async def send_webhook_notification(
                         callback_url=callback_url,
                         error=str(e),
                     )
-                    time.sleep(WEBHOOK_RETRY_BASE_DELAY**attempt)
+                    time.sleep(retry_base_delay**attempt)
 
 
-def process_audio_job(job_request: ProcessingJobRequest) -> Dict[str, Any]:
+def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
     job = get_current_job()
     if job:
         logger.info("Starting RQ job", job_id=job.id, track_id=job_request.track_id)

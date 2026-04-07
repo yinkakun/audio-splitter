@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
-from config.constants import CACHE_CLEANUP_TTL_SECONDS, CACHE_TTL_SECONDS, PROCESSING_TTL_SECONDS
 from config.logger import get_logger
 from services.audio_processor import AudioProcessResult
 
@@ -17,6 +16,13 @@ logger = get_logger(__name__)
 class CacheProtocol(Protocol):
     async def get_key(self, key: str) -> dict | None: ...
     async def put_key(self, key: str, value: dict[str, Any], ttl: int | None = None) -> bool: ...
+
+
+@dataclass
+class TTLConfig:
+    cache: int = 30 * 24 * 3600  # 30 days
+    processing: int = 3600  # 1 hour
+    cleanup: int = 60  # 1 minute
 
 
 @dataclass
@@ -48,11 +54,18 @@ class CacheEntry:
 
 
 class AudioCache:
-    def __init__(self, cache_client: CacheProtocol, storage_client):
+    def __init__(
+        self,
+        cache_client: CacheProtocol,
+        storage_client,
+        ttl_config: TTLConfig | None = None,
+    ):
         self.cache = cache_client
         self.storage = storage_client
-        self.cache_ttl = CACHE_TTL_SECONDS
-        self.processing_ttl = PROCESSING_TTL_SECONDS
+        ttl = ttl_config or TTLConfig()
+        self.cache_ttl = ttl.cache
+        self.processing_ttl = ttl.processing
+        self.cache_cleanup_ttl = ttl.cleanup
 
     def _normalize_search_query(self, search_query: str) -> str:
         normalized = search_query.lower().strip()
@@ -277,7 +290,7 @@ class AudioCache:
     async def _remove_cache_entry(self, cache_key: str) -> None:
         try:
             await self.cache.put_key(
-                f"audio:{cache_key}", {"status": "deleted"}, ttl=CACHE_CLEANUP_TTL_SECONDS
+                f"audio:{cache_key}", {"status": "deleted"}, ttl=self.cache_cleanup_ttl
             )
         except RuntimeError as e:
             logger.warning(f"Failed to remove cache entry {cache_key}: {e}")

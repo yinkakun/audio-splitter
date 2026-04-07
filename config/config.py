@@ -18,6 +18,19 @@ class Config(BaseSettings):
     cleanup_interval: int = 3600
     processing_timeout: int = 60
 
+    # Cache TTL values (in seconds)
+    cache_ttl_seconds: int = 30 * 24 * 3600  # 30 days
+    processing_ttl_seconds: int = 3600  # 1 hour
+    cache_cleanup_ttl_seconds: int = 60
+
+    # Webhook retry settings
+    webhook_retry_max_attempts: int = 3
+    webhook_retry_base_delay: int = 2
+
+    # Health check rate limiting
+    health_check_rate_limit_requests: int = 1000
+    health_check_rate_limit_window: int = 60
+
     models_dir: str = "/tmp/audio-separator-models"
     working_dir: str = "audio_workspace"
     worker_name: str = ""
@@ -65,7 +78,7 @@ class Config(BaseSettings):
     def queue_names(self) -> list[str]:
         return [name.strip() for name in self.worker_queue_names.split(",") if name.strip()]
 
-    def validate_for_production(self) -> None:
+    def check_r2_environment_configs(self) -> None:
         missing_r2_configs = []
 
         if not self.cloudflare_account_id:
@@ -79,6 +92,5 @@ class Config(BaseSettings):
 
         if missing_r2_configs:
             raise RuntimeError(
-                "Missing required R2 environment variables: "
-                + ", ".join(missing_r2_configs)
+                "Missing required R2 environment variables: " + ", ".join(missing_r2_configs)
             )

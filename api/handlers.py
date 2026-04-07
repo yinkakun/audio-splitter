@@ -6,10 +6,6 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
-from config.constants import (
-    DEFAULT_HEALTH_CHECK_RATE_LIMIT_REQUESTS,
-    DEFAULT_HEALTH_CHECK_RATE_LIMIT_WINDOW,
-)
 from config.logger import get_logger
 from models.job import JobStatus
 from models.request import (
@@ -238,8 +234,8 @@ def register_routes(app: FastAPI, config, storage):
                 # Test rate limiter connectivity by checking if a request is allowed
                 _, _ = await rate_limiter.is_allowed(
                     "health_check",
-                    DEFAULT_HEALTH_CHECK_RATE_LIMIT_REQUESTS,
-                    DEFAULT_HEALTH_CHECK_RATE_LIMIT_WINDOW,
+                    config.health_check_rate_limit_requests,
+                    config.health_check_rate_limit_window,
                 )
                 health_status["services"]["rate_limiting_operational"] = True
             except (ConnectionError, TimeoutError, OSError) as e:
