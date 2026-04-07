@@ -1,7 +1,6 @@
 import asyncio
 import mimetypes
 from pathlib import Path
-from typing import Optional
 
 import aioboto3
 import boto3
@@ -64,8 +63,8 @@ class CloudflareR2:
             region_name=self.region,
         )
 
-        self._session: Optional[aioboto3.Session] = None
-        self._config: Optional[AioConfig] = None
+        self._session: aioboto3.Session
+        self._config: AioConfig
         self._init_async_config(config)
 
     def _init_async_config(self, config: R2Storage) -> None:
@@ -90,8 +89,6 @@ class CloudflareR2:
         return content_type or "application/octet-stream"
 
     def upload_file(self, file_path: Path, key: str) -> bool:
-        if not self.client:
-            return False
         try:
             self.client.upload_file(
                 str(file_path),
@@ -106,8 +103,6 @@ class CloudflareR2:
             return False
 
     def file_exists(self, key: str) -> bool:
-        if not self.client:
-            return False
         try:
             self.client.head_object(Bucket=self.bucket_name, Key=key)
             return True
@@ -115,8 +110,6 @@ class CloudflareR2:
             return False
 
     def delete_file(self, key: str) -> bool:
-        if not self.client:
-            return False
         try:
             self.client.delete_object(Bucket=self.bucket_name, Key=key)
             return True
@@ -124,17 +117,13 @@ class CloudflareR2:
             logger.error("R2 delete error: %s", str(e))
             return False
 
-    def get_download_url(self, key: str, public_domain: str = "") -> Optional[str]:
+    def get_download_url(self, key: str, public_domain: str = "") -> str | None:
         if not public_domain:
             return None
         url = f"https://{public_domain}/{key}"
         return url
 
     async def upload_file_async(self, file_path: Path, key: str) -> bool:
-        if not self._session:
-            logger.error("Async session not initialized")
-            return False
-
         try:
             async with self._session.client(  # type: ignore[attr-defined]
                 "s3",
@@ -171,10 +160,6 @@ class CloudflareR2:
         return final_results
 
     async def file_exists_async(self, key: str) -> bool:
-        if not self._session:
-            logger.error("Async session not initialized")
-            return False
-
         try:
             async with self._session.client(  # type: ignore[attr-defined]
                 "s3",

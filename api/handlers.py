@@ -1,6 +1,6 @@
 import time
 import uuid as uuid_module
-from typing import Dict, Optional
+from typing import Dict
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
@@ -15,7 +15,6 @@ from models.job import JobStatus
 from models.request import AudioCacheConfig, ProcessingJobRequest, RedisConfig, StorageConfig
 from services.audio_cache import AudioCache
 from services.dependencies import CacheManagerDep, QueueManagerDep, RateLimiterDep
-from utils.exceptions import RateLimitExceededError, ServiceUnavailableError, ValidationError
 from utils.rate_limiter import RateLimiter, parse_rate_limit
 from workers.job_queue import JobQueue
 
@@ -69,28 +68,6 @@ def register_error_handlers(app: FastAPI):
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
-    @app.exception_handler(ValidationError)
-    async def validation_exception_handler(_: Request, exc: ValidationError):
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": str(exc)},
-        )
-
-    @app.exception_handler(ServiceUnavailableError)
-    async def service_unavailable_handler(_: Request, exc: ServiceUnavailableError):
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"error": str(exc)},
-        )
-
-    @app.exception_handler(RateLimitExceededError)
-    async def rate_limit_handler(_: Request, exc: RateLimitExceededError):
-        return JSONResponse(
-            content={"error": str(exc)},
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            headers={"Retry-After": str(exc.retry_after)} if exc.retry_after > 0 else {},
-        )
-
     @app.exception_handler(ValueError)
     async def value_error_handler(_: Request, exc: ValueError):
         return JSONResponse(
@@ -126,7 +103,7 @@ def register_routes(app: FastAPI, config, storage):
             )
 
     async def _apply_rate_limit(
-        request: Request, rate_limit: str, rate_limiter: Optional[RateLimiter] = RateLimiterDep
+        request: Request, rate_limit: str, rate_limiter: RateLimiter | None = RateLimiterDep
     ):
         if not rate_limiter:
             return
@@ -159,16 +136,16 @@ def register_routes(app: FastAPI, config, storage):
     async def separate_audio(
         request: Request,
         separation_request: SeparationRequest,
-        queue_manager: Optional[JobQueue] = QueueManagerDep,
-        cache_manager: Optional[AudioCache] = CacheManagerDep,
+        queue_manager: JobQueue | None = QueueManagerDep,
+        cache_manager: AudioCache | None = CacheManagerDep,
     ):
         await _verify_api_key(request)
 
-        await _apply_rate_limit(request, config.rate_limits.requests)
+        await _apply_rate_limit(request, config.rate_limit_requests)
         try:
             search_query = sanitize_input(
                 separation_request.search_query,
-                config.input_limits.max_search_query_length,
+                config.max_search_query_length,
             )
         except ValueError as e:
             raise HTTPException(
@@ -194,11 +171,11 @@ def register_routes(app: FastAPI, config, storage):
             cache_key = await cache_manager.mark_processing_start(search_query, track_id)
 
         storage_config = StorageConfig(
-            account_id=config.r2_storage.account_id,
-            access_key_id=config.r2_storage.access_key_id,
-            secret_access_key=config.r2_storage.secret_access_key,
-            bucket_name=config.r2_storage.bucket_name,
-            public_domain=config.r2_storage.public_domain,
+            account_id=config.cloudflare_account_id,
+            access_key_id=config.r2_access_key_id,
+            secret_access_key=config.r2_secret_access_key,
+            bucket_name=config.r2_bucket_name,
+            public_domain=config.r2_public_domain,
         )
 
         cache_manager_config = None
@@ -208,8 +185,8 @@ def register_routes(app: FastAPI, config, storage):
         job_request = ProcessingJobRequest(
             track_id=track_id,
             search_query=search_query,
-            max_file_size_mb=config.input_limits.max_file_size_mb,
-            processing_timeout=config.processing.timeout,
+            max_file_size_mb=config.max_file_size_mb,
+            processing_timeout=config.processing_timeout,
             webhook_url=config.webhook_url,
             webhook_secret=config.webhook_secret,
             cache_key=cache_key,
@@ -234,7 +211,7 @@ def register_routes(app: FastAPI, config, storage):
         }
 
     @app.get("/health", response_model=HealthResponse)
-    async def health_check(rate_limiter: Optional[RateLimiter] = RateLimiterDep):
+    async def health_check(rate_limiter: RateLimiter | None = RateLimiterDep):
         health_status = {
             "status": "healthy",
             "timestamp": time.time(),
@@ -268,7 +245,7 @@ def register_routes(app: FastAPI, config, storage):
 
     @app.get("/job/{track_id}")
     async def get_job_status(
-        request: Request, track_id: str, queue_manager: Optional[JobQueue] = QueueManagerDep
+        request: Request, track_id: str, queue_manager: JobQueue | None = QueueManagerDep
     ):
         await _verify_api_key(request)
 
@@ -294,7 +271,7 @@ def register_routes(app: FastAPI, config, storage):
             ) from e
 
     @app.get("/queue/info")
-    async def get_queue_info(request: Request, queue_manager: Optional[JobQueue] = QueueManagerDep):
+    async def get_queue_info(request: Request, queue_manager: JobQueue | None = QueueManagerDep):
         await _verify_api_key(request)
 
         if not queue_manager:

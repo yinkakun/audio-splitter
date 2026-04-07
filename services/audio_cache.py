@@ -4,7 +4,7 @@ import json
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Protocol
 from urllib.parse import urlparse
 
 from config.constants import (
@@ -18,8 +18,8 @@ logger = get_logger(__name__)
 
 
 class CacheProtocol(Protocol):
-    async def get_key(self, key: str) -> Optional[dict]: ...
-    async def put_key(self, key: str, value: Dict[str, Any], ttl: Optional[int] = None) -> bool: ...
+    async def get_key(self, key: str) -> dict | None: ...
+    async def put_key(self, key: str, value: Dict[str, Any], ttl: int | None = None) -> bool: ...
 
 
 @dataclass
@@ -72,27 +72,17 @@ class AudioCache:
         hash_digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
         return hash_digest[:32]
 
-    def _parse_cache_response(self, raw_data: Any) -> Optional[Dict[str, Any]]:
+    def _parse_cache_response(self, raw_data: Any) -> Dict[str, Any] | None:
         if not raw_data:
             return None
 
         try:
-            if isinstance(raw_data, dict) and "value" in raw_data:
-                if isinstance(raw_data["value"], str):
-                    return json.loads(raw_data["value"])
-                return raw_data["value"]
-
-            if isinstance(raw_data, dict):
-                return raw_data
-
-            if isinstance(raw_data, str):
-                return json.loads(raw_data)
-
-            logger.warning(f"Unexpected response format: {type(raw_data)} - {raw_data}")
-            return None
-
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON: {e}")
+            # Unwrap "value" key if present
+            data = raw_data.get("value", raw_data) if isinstance(raw_data, dict) else raw_data
+            # Parse JSON string if needed
+            return json.loads(data) if isinstance(data, str) else data
+        except (json.JSONDecodeError, TypeError, AttributeError) as e:
+            logger.warning(f"Failed to parse cache response: {e}")
             return None
 
     def _extract_stems_urls(self, result_data: Dict[str, Any]) -> Dict[str, str]:
@@ -105,7 +95,7 @@ class AudioCache:
             }
         return {}
 
-    async def _get_cache_entry(self, cache_key: str) -> Optional[CacheEntry]:
+    async def _get_cache_entry(self, cache_key: str) -> CacheEntry | None:
         try:
             raw_data = await self.cache.get_key(f"audio:{cache_key}")
             if not raw_data:
@@ -242,9 +232,9 @@ class AudioCache:
         except RuntimeError as e:
             logger.error(f"Failed to mark processing for {cache_key}: {e}")
 
-    async def get_cached_or_processing(self, search_query: str) -> Optional[Dict[str, Any]]:
+    async def get_cached_or_processing(self, search_query: str) -> Dict[str, Any] | None:
         cache_key = self._generate_cache_key(search_query)
-        logger.info(f"Cache lookup for query: {search_query[:50]} -> key: {cache_key}")
+        logger.debug(f"Cache lookup for query: {search_query[:50]} -> key: {cache_key}")
 
         cached = await self._get_cache_entry(cache_key)
         if not cached:

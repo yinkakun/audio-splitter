@@ -2,7 +2,6 @@ import json
 import time
 
 import redis.asyncio as redis
-from fastapi import HTTPException, Request
 
 from config.logger import get_logger
 from models.rate_limit import RateLimitInfo
@@ -103,41 +102,3 @@ class RateLimiter:
             reset_time=reset_time,
             retry_after=0,
         )
-
-    def limit(self, rate_limit: str):
-        def decorator(func):
-            async def wrapper(request: Request, *args, **kwargs):
-                try:
-                    limit_requests, window_seconds = parse_rate_limit(rate_limit)
-                except ValueError as e:
-                    logger.warning(str(e))
-                    return await func(request, *args, **kwargs)
-
-                client_ip = request.client.host if request.client else "unknown"
-
-                allowed, info = await self.is_allowed(client_ip, limit_requests, window_seconds)
-
-                if not allowed:
-                    logger.warning(f"Rate limit exceeded for {client_ip}: {rate_limit}")
-                    raise HTTPException(
-                        status_code=429,
-                        detail={
-                            "limit": info.limit,
-                            "remaining": info.remaining,
-                            "reset_time": info.reset_time,
-                            "retry_after": info.retry_after,
-                            "error": "Rate limit exceeded",
-                        },
-                        headers={"Retry-After": str(info.retry_after)},
-                    )
-
-                response = await func(request, *args, **kwargs)
-                if hasattr(response, "headers"):
-                    response.headers["X-RateLimit-Limit"] = str(info.limit)
-                    response.headers["X-RateLimit-Remaining"] = str(info.remaining)
-                    response.headers["X-RateLimit-Reset"] = str(info.reset_time)
-                return response
-
-            return wrapper
-
-        return decorator
