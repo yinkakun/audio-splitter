@@ -73,6 +73,7 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
         logger.info("Starting RQ job", job_id=job.id, track_id=job_request.track_id)
 
     request_ids: list[str] = [job_request.request_id] if job_request.request_id else []
+    cache_manager: AudioCache | None = None
 
     try:
         storage = get_storage_client(
@@ -95,7 +96,6 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
         if not global_separator:
             audio_processor.initialize_model()
 
-        cache_manager = None
         if job_request.cache_manager_config:
             redis_cache = RedisCache(job_request.cache_manager_config.redis_config.url)
             cache_manager = AudioCache(redis_cache, storage)
@@ -175,6 +175,13 @@ def process_audio_job(job_request: ProcessingJobRequest) -> dict[str, Any]:
         logger.error(
             "Audio processing failed", track_id=job_request.track_id, error=error_msg, exc_info=True
         )
+
+        # Clear the processing cache entry so new requests can retry
+        if cache_manager and job_request.cache_key:
+            try:
+                asyncio.run(cache_manager.clear_processing_entry(job_request.cache_key))
+            except RuntimeError as cache_error:
+                logger.warning("Failed to clear cache on failure: %s", cache_error)
 
         failure_payload = {
             "progress": 0,

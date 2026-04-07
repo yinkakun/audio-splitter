@@ -350,6 +350,14 @@ class AudioCache:
         await self._mark_processing(cache_key, youtube_url, track_id, request_id)
         return cache_key
 
+    async def clear_processing_entry(self, cache_key: str) -> None:
+        """Clear a processing cache entry (e.g., when a job fails)."""
+        try:
+            await self._remove_cache_entry(cache_key)
+            logger.info("Cleared processing cache entry: %s", cache_key)
+        except RuntimeError as e:
+            logger.warning("Failed to clear processing entry %s: %s", cache_key, e)
+
     async def cache_completed_result(
         self, cache_key: str, youtube_url: str, result: AudioProcessResult
     ) -> None:

@@ -393,7 +393,7 @@ class AudioProcessor:
             # Second pass: download the validated video
             download_opts: YoutubeDLOpts = {
                 **BASE_YDL_OPTS,
-                "format": "bestaudio[ext=m4a]/bestaudio",
+                "format": "bestaudio/best",
                 "outtmpl": str(job_dir / "original.%(ext)s"),
             }
             with yt_dlp.YoutubeDL(download_opts) as ydl:  # pyright: ignore[reportArgumentType]
