@@ -15,7 +15,6 @@ export R2_SECRET_ACCESS_KEY=your_secret_key
 export R2_PUBLIC_DOMAIN=your_domain
 export API_SECRET_KEY=your_api_secret_key
 export REDIS_URL=rediss://username:password@your-upstash-redis.com:6379
-export DOCKER_REDIS_URL=rediss://username:password@your-upstash-redis.com:6379
 
 # Start services
 docker-compose up --scale worker=2
@@ -29,7 +28,7 @@ docker-compose up --scale worker=2
 curl -X POST http://localhost:5500/separate-audio \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your_api_secret_key" \
-  -d '{"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+  -d "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 # Check status
 curl -H "Authorization: Bearer your_api_secret_key" \
@@ -40,6 +39,7 @@ curl -H "Authorization: Bearer your_api_secret_key" \
 
 | Endpoint | Description |
 |----------|-------------|
+
 | `POST /separate-audio` | Start audio separation job |
 | `GET /job/{track_id}` | Get job status and results |
 | `GET /health` | Health check |
@@ -50,7 +50,7 @@ curl -H "Authorization: Bearer your_api_secret_key" \
 curl -X POST http://localhost:5500/separate-audio \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your_api_secret_key" \
-  -d '{"youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+  -d "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 ```
 
 ### Response
@@ -68,13 +68,13 @@ Required environment variables:
 
 | Variable | Description |
 |----------|-------------|
+
 | `API_SECRET_KEY` | API authentication key |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
 | `R2_ACCESS_KEY_ID` | R2 storage access key |
 | `R2_SECRET_ACCESS_KEY` | R2 storage secret key |
 | `R2_PUBLIC_DOMAIN` | R2 bucket domain |
-| `REDIS_URL` | Redis connection URL for local non-Docker runs |
-| `DOCKER_REDIS_URL` | Redis connection URL for containers; defaults to `redis://redis:6379` |
+| `REDIS_URL` | Redis connection URL; defaults to `redis://redis:6379` in Docker |
 
 Optional:
 
