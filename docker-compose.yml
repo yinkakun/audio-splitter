@@ -20,15 +20,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=${DOCKER_REDIS_URL:-redis://redis:6379}
       - API_SECRET_KEY=${API_SECRET_KEY}
       - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
-      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
-      - CLOUDFLARE_KV_NAMESPACE_ID=${CLOUDFLARE_KV_NAMESPACE_ID}
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
     volumes:
@@ -46,15 +44,13 @@ services:
     environment:
       - QUEUE_NAMES=default
       - WORKER_CONCURRENCY=1
-      - REDIS_URL=${REDIS_URL}
+      - REDIS_URL=${DOCKER_REDIS_URL:-redis://redis:6379}
       - API_SECRET_KEY=${API_SECRET_KEY}
       - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID}
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
-      - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
-      - CLOUDFLARE_KV_NAMESPACE_ID=${CLOUDFLARE_KV_NAMESPACE_ID}
     volumes:
       - audio_workspace:/home/appuser/audio_workspace
       - audio_model_cache:/home/appuser/models

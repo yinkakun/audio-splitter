@@ -15,6 +15,7 @@ export R2_SECRET_ACCESS_KEY=your_secret_key
 export R2_PUBLIC_DOMAIN=your_domain
 export API_SECRET_KEY=your_api_secret_key
 export REDIS_URL=rediss://username:password@your-upstash-redis.com:6379
+export DOCKER_REDIS_URL=rediss://username:password@your-upstash-redis.com:6379
 
 # Start services
 docker-compose up --scale worker=2
@@ -72,12 +73,12 @@ Required environment variables:
 | `R2_ACCESS_KEY_ID` | R2 storage access key |
 | `R2_SECRET_ACCESS_KEY` | R2 storage secret key |
 | `R2_PUBLIC_DOMAIN` | R2 bucket domain |
-| `REDIS_URL` | Redis connection URL |
+| `REDIS_URL` | Redis connection URL for local non-Docker runs |
+| `DOCKER_REDIS_URL` | Redis connection URL for containers; defaults to `redis://redis:6379` |
 
 Optional:
 
 - `WEBHOOK_URL` - Job completion notifications
-- `CLOUDFLARE_API_TOKEN` - Rate limiting
 - `PORT` - Server port (default: 5500)
 
 ## Deployment
