@@ -27,10 +27,9 @@ services:
       - WEBHOOK_URL=${WEBHOOK_URL:-}
       - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
     volumes:
-      - audio_workspace:/app/audio_workspace
-      - audio_model_cache:/tmp/audio-separator-model
+      - audio_workspace:/home/appuser/audio_workspace
+      - audio_model_cache:/home/appuser/models
     depends_on:
-      - worker
       - redis
     restart: unless-stopped
 
@@ -51,11 +50,13 @@ services:
       - CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}
       - CLOUDFLARE_KV_NAMESPACE_ID=${CLOUDFLARE_KV_NAMESPACE_ID}
     volumes:
-      - audio_workspace:/app/audio_workspace
-      - audio_model_cache:/tmp/audio-separator-models
+      - audio_workspace:/home/appuser/audio_workspace
+      - audio_model_cache:/home/appuser/models
+    depends_on:
+      - redis
     restart: unless-stopped
     deploy:
-      replicas: 2 
+      replicas: 2
 
 volumes:
   audio_workspace:
