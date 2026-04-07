@@ -9,15 +9,15 @@ def create_app() -> FastAPI:
     config = Config()
     config.validate_for_production()
 
-    setup_logging(config.server.debug)
+    setup_logging(config.debug)
 
     storage = CloudflareR2(
         config=R2Storage(
             account_id=config.cloudflare_account_id,
-            bucket_name=config.r2_storage.bucket_name,
-            public_domain=config.r2_storage.public_domain,
-            access_key_id=config.r2_storage.access_key_id,
-            secret_access_key=config.r2_storage.secret_access_key,
+            bucket_name=config.r2_bucket_name,
+            public_domain=config.r2_public_domain,
+            access_key_id=config.r2_access_key_id,
+            secret_access_key=config.r2_secret_access_key,
         )
     )
 

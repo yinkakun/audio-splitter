@@ -1,41 +1,5 @@
-from pydantic import BaseModel, computed_field
+from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-
-class InputLimitsSettings(BaseModel):
-    max_search_query_length: int
-    max_file_size_mb: int
-
-
-class ProcessingSettings(BaseModel):
-    timeout: int
-    max_workers: int
-    max_active_jobs: int
-    cleanup_interval: int
-
-
-class RateLimitsSettings(BaseModel):
-    requests: str
-    separation: str
-
-
-class ServerSettings(BaseModel):
-    host: str
-    port: int
-    debug: bool
-
-
-class R2Config(BaseModel):
-    account_id: str
-    access_key_id: str
-    secret_access_key: str
-    bucket_name: str
-    public_domain: str
-
-
-class RedisConfig(BaseModel):
-    url: str
-    max_connections: int = 10
 
 
 class Config(BaseSettings):
@@ -83,47 +47,6 @@ class Config(BaseSettings):
 
     @computed_field
     @property
-    def input_limits(self) -> InputLimitsSettings:
-        return InputLimitsSettings(
-            max_search_query_length=self.max_search_query_length,
-            max_file_size_mb=self.max_file_size_mb,
-        )
-
-    @computed_field
-    @property
-    def processing(self) -> ProcessingSettings:
-        return ProcessingSettings(
-            timeout=self.processing_timeout,
-            max_workers=self.max_workers,
-            max_active_jobs=self.max_active_jobs,
-            cleanup_interval=self.cleanup_interval,
-        )
-
-    @computed_field
-    @property
-    def rate_limits(self) -> RateLimitsSettings:
-        return RateLimitsSettings(
-            requests=self.rate_limit_requests, separation=self.rate_limit_separation
-        )
-
-    @computed_field
-    @property
-    def server(self) -> ServerSettings:
-        return ServerSettings(host=self.host, port=self.port, debug=self.debug)
-
-    @computed_field
-    @property
-    def r2_storage(self) -> R2Config:
-        return R2Config(
-            account_id=self.cloudflare_account_id,
-            access_key_id=self.r2_access_key_id,
-            secret_access_key=self.r2_secret_access_key,
-            bucket_name=self.r2_bucket_name,
-            public_domain=self.r2_public_domain,
-        )
-
-    @computed_field
-    @property
     def r2_storage_enabled(self) -> bool:
         return bool(
             self.cloudflare_account_id
@@ -131,11 +54,6 @@ class Config(BaseSettings):
             and self.r2_secret_access_key
             and self.r2_public_domain
         )
-
-    @computed_field
-    @property
-    def redis_config(self) -> RedisConfig:
-        return RedisConfig(url=self.redis_url)
 
     @computed_field
     @property

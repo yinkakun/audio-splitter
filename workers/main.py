@@ -24,7 +24,7 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     config = Config()
-    setup_logging(config.server.debug)
+    setup_logging(config.debug)
 
     if not config.redis_enabled:
         logger.error("Redis URL not configured. Set REDIS_URL environment variable.")
