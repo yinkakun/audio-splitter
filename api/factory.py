@@ -13,39 +13,32 @@ from workers.job_queue import JobQueue
 logger = get_logger(__name__)
 
 
-def setup_services(config):
+async def initialize_services(config, storage) -> None:
+    """Initialize all services: Redis, storage, and cache."""
+    # Initialize Redis-based services
     if config.redis_enabled:
         try:
             default_queue_name = config.queue_names[0] if config.queue_names else "default"
-            services.queue_manager = JobQueue(
-                config.redis_url,
-                default_queue_name=default_queue_name,
-            )
-            queue_info = services.queue_manager.get_queue_info()
-            logger.info(f"Queue info at startup: {queue_info}")
+            services.queue_manager = JobQueue(config.redis_url, default_queue_name=default_queue_name)
             services.rate_limiter = RateLimiter(config.redis_url)
             services.redis_cache = RedisCache(config.redis_url)
+            services.cache_manager = AudioCache(services.redis_cache, storage)
+            logger.info("Redis services initialized")
         except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
             services.rate_limiter = None
             services.redis_cache = None
             services.queue_manager = None
+            services.cache_manager = None
             logger.error(f"Failed to initialize Redis services: {e}")
     else:
         logger.warning("Redis not configured - Redis services disabled")
 
-
-async def initialize_storage(storage):
-    """Initialize and verify storage connectivity"""
+    # Verify storage connectivity
     try:
         await storage.file_exists_async("_startup_test")
         logger.info("R2 storage connectivity verified")
     except (ConnectionError, TimeoutError, OSError) as e:
         logger.error(f"Storage startup validation failed: {e}")
-
-
-def setup_cache_manager(storage) -> None:
-    if services.redis_cache:
-        services.cache_manager = AudioCache(services.redis_cache, storage)
 
 
 def configure_middleware(app: FastAPI, _config) -> None:
@@ -61,15 +54,8 @@ def configure_middleware(app: FastAPI, _config) -> None:
 def create_lifespan_manager(config, storage):
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        # Startup
-        setup_services(config)
-
-        await initialize_storage(storage)
-        setup_cache_manager(storage)
-
-        # Shutdown
+        await initialize_services(config, storage)
         yield
-
         await services.close()
         await storage.close()
 
