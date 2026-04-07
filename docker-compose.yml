@@ -7,6 +7,11 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   web:
     build:
@@ -30,7 +35,8 @@ services:
       - audio_workspace:/home/appuser/audio_workspace
       - audio_model_cache:/home/appuser/models
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   worker:
@@ -53,7 +59,8 @@ services:
       - audio_workspace:/home/appuser/audio_workspace
       - audio_model_cache:/home/appuser/models
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     deploy:
       replicas: 2
