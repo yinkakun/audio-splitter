@@ -1,13 +1,13 @@
 from pathlib import Path
-from typing import Dict, List
 
 from config.logger import get_logger
 
 logger = get_logger(__name__)
 
+
 class AudioClassifier:
     REQUIRED_STEMS = {"vocals", "bass", "drums", "other"}
-    STEM_PATTERNS: Dict[str, List[str]] = {
+    STEM_PATTERNS: dict[str, list[str]] = {
         "vocals": ["vocals", "(vocals)"],
         "bass": ["bass", "(bass)"],
         "drums": ["drums", "(drums)"],
@@ -22,13 +22,13 @@ class AudioClassifier:
     }
 
     @classmethod
-    def _iter_audio_files(cls, output_dir: Path) -> List[Path]:
+    def _iter_audio_files(cls, output_dir: Path) -> list[Path]:
         return sorted(
             file_path for file_path in output_dir.rglob("*") if file_path.is_file()
         )
 
     @classmethod
-    def _matches_patterns(cls, file_path: Path, patterns: List[str]) -> bool:
+    def _matches_patterns(cls, file_path: Path, patterns: list[str]) -> bool:
         stem_lower = file_path.stem.lower()
         return any(pattern.lower() in stem_lower for pattern in patterns)
 

@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi import Depends
 
 from services.audio_cache import AudioCache
@@ -10,10 +8,10 @@ from workers.job_queue import JobQueue
 
 class Services:
     def __init__(self):
-        self.rate_limiter: Optional[RateLimiter] = None
-        self.redis_cache: Optional[RedisCache] = None
-        self.cache_manager: Optional[AudioCache] = None
-        self.queue_manager: Optional[JobQueue] = None
+        self.rate_limiter: RateLimiter | None = None
+        self.redis_cache: RedisCache | None = None
+        self.cache_manager: AudioCache | None = None
+        self.queue_manager: JobQueue | None = None
 
     async def close(self):
         """Close all services"""
