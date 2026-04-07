@@ -4,7 +4,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
-from typing import Optional, Protocol, Required, TypedDict, cast
+from typing import Protocol, Required, TypedDict, cast
 
 import yt_dlp
 from audio_separator.separator import Separator
@@ -37,6 +37,8 @@ class YtDlpEntry(TypedDict, total=False):
     title: str
     filesize: int | None
     filesize_approx: int | None
+    webpage_url: str
+    url: str
 
 
 class YtDlpSearchResult(TypedDict, total=False):
@@ -71,7 +73,7 @@ class SeparatorProvider(Protocol):
 
 class DefaultSeparatorProvider:
     def __init__(self, models_dir: str):
-        self._separator: Optional[Separator] = None
+        self._separator: Separator | None = None
         # RLock needed: separate_and_move acquires lock then calls get_separator which may also acquire
         self._separator_lock = threading.RLock()
         self.model_load_timeout = 60 * 15  # 15 minutes
@@ -219,7 +221,7 @@ class AudioProcessor:
         storage,
         models_dir: str,
         working_dir: str,
-        separator_provider: Optional[DefaultSeparatorProvider] = None,
+        separator_provider: DefaultSeparatorProvider | None = None,
     ):
         self.storage = storage
         self.working_dir = Path(working_dir)
@@ -242,17 +244,13 @@ class AudioProcessor:
     def initialize_model(self) -> None:
         self.separator_provider.initialize_model()
 
-    def _validate_file_size(self, size_bytes: int, max_file_size_mb: int = 100) -> None:
+    def _validate_file_size(
+        self, size_bytes: int, max_file_size_mb: int = 100, is_approx: bool = False
+    ) -> None:
         size_mb = int(size_bytes) / (1024 * 1024)
         if size_mb > max_file_size_mb:
-            raise ValueError(f"File too large: {size_mb:.1f}MB (limit: {max_file_size_mb}MB)")
-
-    def _validate_file_size_approx(self, size_bytes: int, max_file_size_mb: int = 100) -> None:
-        size_mb = int(size_bytes) / (1024 * 1024)
-        if size_mb > max_file_size_mb:
-            raise ValueError(
-                f"File too large (approx): {size_mb:.1f}MB (limit: {max_file_size_mb}MB)"
-            )
+            approx_label = " (approx)" if is_approx else ""
+            raise ValueError(f"File too large{approx_label}: {size_mb:.1f}MB (limit: {max_file_size_mb}MB)")
 
     def _validate_audio_file(self, audio_file: Path) -> None:
         if not audio_file.exists():
@@ -330,7 +328,7 @@ class AudioProcessor:
         logger.info("Upload successful", track_id=track_id)
         return self.create_result_dict(track_id, original_title, uploaded_keys)
 
-    def _cleanup_job_directory(self, job_dir: Optional[Path]) -> None:
+    def _cleanup_job_directory(self, job_dir: Path | None) -> None:
         if job_dir and job_dir.exists():
             shutil.rmtree(job_dir, ignore_errors=True)
 
@@ -341,7 +339,7 @@ class AudioProcessor:
         max_file_size_mb: int,
         processing_timeout: int | None = None,
     ) -> AudioProcessResult:
-        job_dir: Optional[Path] = None
+        job_dir: Path | None = None
 
         try:
             job_dir = self._setup_job_directory(track_id)
@@ -362,11 +360,9 @@ class AudioProcessor:
             return result
 
         except (RuntimeError, OSError, FileNotFoundError, ValueError, TimeoutError) as e:
-            error_msg = str(e)
             logger.error(
-                "Audio processing failed", track_id=track_id, error=error_msg, query=search_query
+                "Audio processing failed", track_id=track_id, error=str(e), query=search_query
             )
-            logger.error("Job failed", track_id=track_id, error=error_msg)
             self.storage.cleanup_track_files(track_id)
             raise
 
@@ -374,7 +370,7 @@ class AudioProcessor:
             self._cleanup_job_directory(job_dir)
 
     def create_result_dict(
-        self, track_id: str, original_title: Optional[str], uploaded_keys: dict[str, str]
+        self, track_id: str, original_title: str | None, uploaded_keys: dict[str, str]
     ) -> AudioProcessResult:
         result: AudioProcessResult = {
             "original_title": original_title or "Unknown Title",
@@ -416,7 +412,7 @@ class AudioProcessor:
 
         filesize_approx = entry.get("filesize_approx")
         if filesize_approx:
-            self._validate_file_size_approx(filesize_approx, max_file_size_mb)
+            self._validate_file_size(filesize_approx, max_file_size_mb, is_approx=True)
 
     def _extract_title_from_entry(self, entry: YtDlpEntry) -> str:
         title_value = entry.get("title")
@@ -424,42 +420,36 @@ class AudioProcessor:
 
     def download_audio(
         self, job_dir: Path, search_query: str, max_file_size_mb: int
-    ) -> tuple[Path, Optional[str]]:
+    ) -> tuple[Path, str | None]:
         def _download():
             search_term = f"ytsearch1:{search_query}"
-            extract_opts: YoutubeDLOpts = {
-                **self._get_base_ydl_opts(),
-                "format": "bestaudio/best",
-            }
-            with yt_dlp.YoutubeDL(extract_opts) as ydl:  # pyright: ignore[reportArgumentType]
-                search_results = ydl.extract_info(search_term, download=False)
-                if search_results is None:
-                    raise RuntimeError("No search results found")
-                first_entry = self._validate_search_results(
-                    cast(YtDlpSearchResult, search_results)
-                )
-                self._validate_entry_file_size(first_entry, max_file_size_mb)
+            base_opts = self._get_base_ydl_opts()
 
+            # First pass: extract info to validate file size before downloading
+            with yt_dlp.YoutubeDL({**base_opts, "format": "bestaudio/best"}) as ydl:  # pyright: ignore[reportArgumentType]
+                search_results = ydl.extract_info(search_term, download=False)
+                if not search_results:
+                    raise RuntimeError("No search results found")
+                first_entry = self._validate_search_results(cast(YtDlpSearchResult, search_results))
+                self._validate_entry_file_size(first_entry, max_file_size_mb)
+                video_url = first_entry.get("webpage_url") or first_entry.get("url")
+                original_title = self._extract_title_from_entry(first_entry)
+
+            # Second pass: download the validated video
             download_opts: YoutubeDLOpts = {
-                **self._get_base_ydl_opts(),
+                **base_opts,
                 "format": "bestaudio[ext=m4a]/bestaudio",
                 "outtmpl": str(job_dir / "original.%(ext)s"),
             }
             with yt_dlp.YoutubeDL(download_opts) as ydl:  # pyright: ignore[reportArgumentType]
-                search_results = ydl.extract_info(search_term, download=True)
-                if search_results is None:
-                    raise RuntimeError("No search results found")
-                first_entry = self._validate_search_results(
-                    cast(YtDlpSearchResult, search_results)
-                )
+                ydl.download([video_url or search_term])
 
-                for file_path in job_dir.iterdir():
-                    if file_path.name.startswith("original."):
-                        self._validate_file_size(file_path.stat().st_size, max_file_size_mb)
-                        original_title = self._extract_title_from_entry(first_entry)
-                        return file_path, original_title
+            for file_path in job_dir.iterdir():
+                if file_path.name.startswith("original."):
+                    self._validate_file_size(file_path.stat().st_size, max_file_size_mb)
+                    return file_path, original_title
 
-                raise RuntimeError("Downloaded file not found")
+            raise RuntimeError("Downloaded file not found")
 
         try:
             return run_with_timeout(_download, timeout=300)
