@@ -209,7 +209,7 @@ def register_routes(app: FastAPI, config, storage):
             track_id=track_id,
             search_query=search_query,
             max_file_size_mb=config.input_limits.max_file_size_mb,
-            processing_timeout=getattr(config.processing, "processing_timeout", None),
+            processing_timeout=config.processing.timeout,
             webhook_url=config.webhook_url,
             webhook_secret=config.webhook_secret,
             cache_key=cache_key,

@@ -3,6 +3,7 @@ import signal
 import sys
 
 from rq import Queue, Worker
+from rq.worker_pool import WorkerPool
 
 from config.config import Config
 from config.logger import get_logger, setup_logging
@@ -30,7 +31,7 @@ def main():
         sys.exit(1)
 
     worker_name = config.worker_name
-    queue_names = config.queue_names
+    queue_names = config.queue_names or ["default"]
     worker_concurrency = config.worker_concurrency
 
     logger.info(
@@ -47,19 +48,32 @@ def main():
         set_global_separator_provider(separator_provider)
         logger.info("model initialized successfully")
 
-        queue_manager = JobQueue(config.redis_url)
+        queue_manager = JobQueue(config.redis_url, default_queue_name=queue_names[0])
         redis_connection = queue_manager.get_redis_connection()
 
         queues = [Queue(name, connection=redis_connection) for name in queue_names]
+        if worker_concurrency > 1:
+            worker_pool = WorkerPool(
+                queues=queues,
+                connection=redis_connection,
+                num_workers=worker_concurrency,
+            )
+            logger.info(
+                "Worker pool started",
+                worker_pool_name=worker_pool.name,
+                worker_count=worker_concurrency,
+                worker_pid=os.getpid(),
+            )
+            worker_pool.start()
+        else:
+            worker = Worker(
+                queues=queues,
+                name=worker_name,
+                connection=redis_connection,
+            )
 
-        worker = Worker(
-            queues=queues,
-            name=worker_name,
-            connection=redis_connection,
-        )
-
-        logger.info("Worker started successfully", worker_name=worker.name, worker_pid=os.getpid())
-        worker.work(with_scheduler=True)
+            logger.info("Worker started", worker_name=worker.name, worker_pid=os.getpid())
+            worker.work(with_scheduler=True)
     except (ConnectionError, RuntimeError) as e:
         logger.error(f"Worker failed to start: {e}", exc_info=True)
         sys.exit(1)

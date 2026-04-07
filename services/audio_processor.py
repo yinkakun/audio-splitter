@@ -15,6 +15,7 @@ from services.audio_classifier import AudioClassifier
 logger = get_logger(__name__)
 
 MODEL_FILENAME = "htdemucs_ft.yaml"
+DEFAULT_PROCESSING_TIMEOUT_SECONDS = 300
 
 
 class MdxParams(TypedDict):
@@ -295,7 +296,12 @@ class AudioProcessor:
         return job_dir
 
     def _process_audio_files(
-        self, job_dir: Path, track_id: str, search_query: str, max_file_size_mb: int
+        self,
+        job_dir: Path,
+        track_id: str,
+        search_query: str,
+        max_file_size_mb: int,
+        processing_timeout: int | None = None,
     ) -> tuple[dict[str, Path], str]:
         logger.info("Downloading audio", track_id=track_id, query=search_query)
         downloaded_file, original_title = self.download_audio(
@@ -303,7 +309,12 @@ class AudioProcessor:
         )
 
         logger.info("Separating audio", track_id=track_id)
-        stem_files = self.separate_audio_tracks(job_dir, downloaded_file, track_id)
+        stem_files = self.separate_audio_tracks(
+            job_dir,
+            downloaded_file,
+            track_id,
+            processing_timeout or DEFAULT_PROCESSING_TIMEOUT_SECONDS,
+        )
 
         return stem_files, original_title or ""
 
@@ -328,6 +339,7 @@ class AudioProcessor:
         track_id: str,
         search_query: str,
         max_file_size_mb: int,
+        processing_timeout: int | None = None,
     ) -> AudioProcessResult:
         job_dir: Optional[Path] = None
 
@@ -335,7 +347,11 @@ class AudioProcessor:
             job_dir = self._setup_job_directory(track_id)
 
             stem_files, original_title = self._process_audio_files(
-                job_dir, track_id, search_query, max_file_size_mb
+                job_dir,
+                track_id,
+                search_query,
+                max_file_size_mb,
+                processing_timeout,
             )
 
             result = self._upload_and_create_result(track_id, stem_files, original_title)
@@ -459,7 +475,7 @@ class AudioProcessor:
         job_dir: Path,
         audio_file: Path,
         track_id: str,
-        processing_timeout: int = 300,
+        processing_timeout: int = DEFAULT_PROCESSING_TIMEOUT_SECONDS,
     ) -> dict[str, Path]:
         output_dir = job_dir / "separated"
         output_dir.mkdir(exist_ok=True, parents=True)

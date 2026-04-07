@@ -12,10 +12,11 @@ logger = get_logger(__name__)
 
 
 class JobQueue:
-    def __init__(self, redis_url: str):
+    def __init__(self, redis_url: str, default_queue_name: str = "default"):
         self.redis_url = redis_url
+        self.default_queue_name = default_queue_name
         self._connection = None
-        self._queue = None
+        self._queues: dict[str, RQQueue] = {}
 
     def get_redis_connection(self) -> redis.Redis:
         if self._connection is None:
@@ -45,19 +46,22 @@ class JobQueue:
 
         return self._connection
 
-    def get_queue(self, queue_name: str = "default") -> RQQueue:
-        if self._queue is None:
+    def get_queue(self, queue_name: str | None = None) -> RQQueue:
+        queue_name = queue_name or self.default_queue_name
+
+        if queue_name not in self._queues:
             connection = self.get_redis_connection()
-            self._queue = RQQueue(queue_name, connection=connection)
+            self._queues[queue_name] = RQQueue(queue_name, connection=connection)
             logger.info(f"Queue '{queue_name}' initialized")
-        return self._queue
+        return self._queues[queue_name]
 
     def enqueue_job(
         self,
         job_request: ProcessingJobRequest,
         job_timeout: int = 60 * 10,  # 10 minutes
+        queue_name: str | None = None,
     ):
-        queue = self.get_queue()
+        queue = self.get_queue(queue_name)
 
         job = queue.enqueue(
             process_audio_job,
@@ -120,4 +124,4 @@ class JobQueue:
                 logger.error(f"Error closing Redis connection: {e}")
             finally:
                 self._connection = None
-                self._queue = None
+                self._queues = {}

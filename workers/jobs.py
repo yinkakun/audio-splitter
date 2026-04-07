@@ -108,6 +108,7 @@ def process_audio_job(job_request: ProcessingJobRequest) -> Dict[str, Any]:
             track_id=job_request.track_id,
             search_query=job_request.search_query,
             max_file_size_mb=job_request.max_file_size_mb,
+            processing_timeout=job_request.processing_timeout,
         )
 
         logger.info("Audio processing completed successfully", track_id=job_request.track_id)
@@ -139,7 +140,12 @@ def process_audio_job(job_request: ProcessingJobRequest) -> Dict[str, Any]:
 
         return success_payload
 
-    except (ConnectionError, TimeoutError, RuntimeError) as e:
+    # Expected failure modes during audio processing:
+    # - ConnectionError/TimeoutError: network issues during download or upload
+    # - RuntimeError: separation failures, YouTube errors, storage errors
+    # - OSError/FileNotFoundError: filesystem issues, missing audio files
+    # - ValueError: invalid file sizes, unsupported formats, empty files
+    except (ConnectionError, TimeoutError, RuntimeError, OSError, FileNotFoundError, ValueError) as e:
         error_msg = str(e)
         logger.error(
             "Audio processing failed", track_id=job_request.track_id, error=error_msg, exc_info=True

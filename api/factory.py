@@ -16,7 +16,11 @@ logger = get_logger(__name__)
 def setup_services(config):
     if config.redis_enabled:
         try:
-            services.queue_manager = JobQueue(config.redis_url)
+            default_queue_name = config.queue_names[0] if config.queue_names else "default"
+            services.queue_manager = JobQueue(
+                config.redis_url,
+                default_queue_name=default_queue_name,
+            )
             queue_info = services.queue_manager.get_queue_info()
             logger.info(f"Queue info at startup: {queue_info}")
             services.rate_limiter = RateLimiter(config.redis_url)
