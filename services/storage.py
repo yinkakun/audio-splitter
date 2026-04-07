@@ -9,7 +9,6 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from pydantic import BaseModel
 
 from config.logger import get_logger
-from services.audio_classifier import AudioClassifier
 
 logger = get_logger(__name__)
 
@@ -186,10 +185,6 @@ class CloudflareR2:
                     logger.warning("Failed to clean up R2 file %s: %s", r2_key, e)
         except (TypeError, ValueError, AttributeError, ClientError, NoCredentialsError) as e:
             logger.error("Unexpected error during cleanup for %s: %s", track_id, e)
-
-    @staticmethod
-    def detect_stem_files(output_dir: Path) -> dict[str, Path]:
-        return AudioClassifier.detect_stem_files(output_dir)
 
     def _rollback_uploaded_keys(self, uploaded_keys: dict[str, str]) -> None:
         """Delete already-uploaded files during a failed batch upload."""
