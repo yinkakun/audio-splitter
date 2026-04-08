@@ -39,7 +39,6 @@ curl -H "Authorization: Bearer your_api_secret_key" \
 
 | Endpoint | Description |
 |----------|-------------|
-
 | `POST /separate-audio` | Start audio separation job |
 | `GET /job/{track_id}` | Get job status and results |
 | `GET /health` | Health check |
@@ -55,7 +54,6 @@ curl -X POST http://localhost:5500/separate-audio \
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-
 | `audio_url` | string | Yes | Any yt-dlp compatible URL (YouTube, SoundCloud, Vimeo, etc.) |
 | `request_id` | string | Yes | Caller-provided correlation ID for webhook callbacks |
 
@@ -115,7 +113,6 @@ Required environment variables:
 
 | Variable | Description |
 |----------|-------------|
-
 | `API_SECRET_KEY` | API authentication key |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
 | `R2_ACCESS_KEY_ID` | R2 storage access key |
