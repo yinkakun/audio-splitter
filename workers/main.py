@@ -1,8 +1,9 @@
 import os
+import platform
 import signal
 import sys
 
-from rq import Queue, Worker
+from rq import Queue, SimpleWorker, Worker
 from rq.worker_pool import WorkerPool
 
 from config.config import Config
@@ -42,10 +43,21 @@ def main():
     )
 
     try:
-        separator_provider = DefaultSeparatorProvider(config.models_dir)
+        separator_provider = DefaultSeparatorProvider(
+            models_dir=config.models_dir,
+            working_dir=config.working_dir,
+            model_filename=f"{config.separation_model}.yaml",
+            output_format=config.output_format,
+            output_bitrate=config.output_bitrate,
+        )
         separator_provider.initialize_model()
         set_global_separator_provider(separator_provider)
-        logger.info("model initialized successfully")
+        logger.info(
+            "Model initialized successfully",
+            model=config.separation_model,
+            output_format=config.output_format,
+            output_bitrate=config.output_bitrate,
+        )
 
         queue_manager = JobQueue(config.redis_url, default_queue_name=queue_names[0])
         redis_connection = queue_manager.get_redis_connection()
@@ -65,13 +77,21 @@ def main():
             )
             worker_pool.start()
         else:
-            worker = Worker(
+            # Use SimpleWorker on macOS to avoid fork + MPS crashes
+            # SimpleWorker runs jobs in the main process (no forking)
+            worker_class = SimpleWorker if platform.system() == "Darwin" else Worker
+            worker = worker_class(
                 queues=queues,
                 name=worker_name,
                 connection=redis_connection,
             )
 
-            logger.info("Worker started", worker_name=worker.name, worker_pid=os.getpid())
+            logger.info(
+                "Worker started",
+                worker_name=worker.name,
+                worker_pid=os.getpid(),
+                worker_type=worker_class.__name__,
+            )
             worker.work(with_scheduler=True)
     except (ConnectionError, RuntimeError) as e:
         logger.error(f"Worker failed to start: {e}", exc_info=True)
