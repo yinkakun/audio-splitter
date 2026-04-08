@@ -20,6 +20,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      - PROCESSING_TIMEOUT=900
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - API_SECRET_KEY=${API_SECRET_KEY}
       - CLOUDFLARE_ACCOUNT_ID=${CLOUDFLARE_ACCOUNT_ID}
@@ -42,6 +43,7 @@ services:
       context: .
       target: worker
     environment:
+      - PROCESSING_TIMEOUT=900
       - QUEUE_NAMES=default
       - WORKER_CONCURRENCY=1
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
@@ -59,7 +61,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
     deploy:
-      replicas: 2
+      replicas: 1
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 8G
 
 volumes:
   audio_workspace:
