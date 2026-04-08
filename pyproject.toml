@@ -25,6 +25,7 @@ dependencies = [
     "cloudflare>=4.3.1",
     "rq>=1.18.0",
     "redis>=5.2.0",
+    "nest-asyncio>=1.6.0",
 ]
 
 [dependency-groups]
