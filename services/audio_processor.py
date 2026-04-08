@@ -14,9 +14,11 @@ from services.audio_classifier import AudioClassifier
 
 logger = get_logger(__name__)
 
-MODEL_FILENAME = "htdemucs_ft.yaml"
-DEFAULT_PROCESSING_TIMEOUT_SECONDS = 300
-BASE_YDL_OPTS: "YoutubeDLOpts" = {"quiet": True, "no_warnings": True}
+DEFAULT_MODEL_FILENAME = "htdemucs.yaml"
+DEFAULT_OUTPUT_FORMAT = "MP3"
+DEFAULT_OUTPUT_BITRATE = "192k"
+DEFAULT_PROCESSING_TIMEOUT_SECONDS = 1000
+BASE_YT_DLP_OPTS: "YtDLOpts" = {"quiet": True, "no_warnings": True}
 
 
 class MdxParams(TypedDict):
@@ -27,7 +29,7 @@ class MdxParams(TypedDict):
     enable_denoise: bool
 
 
-class YoutubeDLOpts(TypedDict, total=False):
+class YtDLOpts(TypedDict, total=False):
     quiet: bool
     no_warnings: bool
     format: str
@@ -60,13 +62,24 @@ mdx_params: MdxParams = {
 
 
 class DefaultSeparatorProvider:
-    def __init__(self, models_dir: str):
+    def __init__(
+        self,
+        models_dir: str,
+        working_dir: str = "audio_workspace",
+        model_filename: str = DEFAULT_MODEL_FILENAME,
+        output_format: str = DEFAULT_OUTPUT_FORMAT,
+        output_bitrate: str = DEFAULT_OUTPUT_BITRATE,
+    ):
         self._separator: Separator | None = None
-        # RLock needed: separate_and_move acquires lock then calls get_separator which may also acquire
+        # RLock needed: separate_and_move acquires lock
+        # then calls get_separator which may also acquire
         self._separator_lock = threading.RLock()
         self.model_load_timeout = 60 * 15  # 15 minutes
-        self.working_dir = Path("audio_workspace")
+        self.working_dir = Path(working_dir)
         self.models_dir = models_dir
+        self.model_filename = model_filename
+        self.output_format = output_format
+        self.output_bitrate = output_bitrate
 
     def initialize_model(self) -> None:
         with self._separator_lock:
@@ -75,13 +88,13 @@ class DefaultSeparatorProvider:
 
             try:
                 self._separator = self._create_separator()
-                self._separator.load_model(model_filename=MODEL_FILENAME)
-                logger.info("Separator model preloaded successfully", model=MODEL_FILENAME)
+                self._separator.load_model(model_filename=self.model_filename)
+                logger.info("Separator model preloaded successfully", model=self.model_filename)
             except (ImportError, RuntimeError, OSError) as e:
                 logger.error(
                     "Failed to preload separator model on startup",
                     error=str(e),
-                    model=MODEL_FILENAME,
+                    model=self.model_filename,
                     models_dir=self.models_dir,
                 )
                 self._separator = None
@@ -93,8 +106,8 @@ class DefaultSeparatorProvider:
 
         separator_config = {
             "output_dir": str(self.working_dir.resolve()),
-            "output_format": "WAV",
-            "output_bitrate": "320k",
+            "output_format": self.output_format,
+            "output_bitrate": self.output_bitrate,
             "normalization_threshold": 0.9,
             "amplification_threshold": 0.9,
             "mdx_params": mdx_params,
@@ -119,7 +132,7 @@ class DefaultSeparatorProvider:
 
             try:
                 self._separator = self._create_separator()
-                self._separator.load_model(model_filename=MODEL_FILENAME)
+                self._separator.load_model(model_filename=self.model_filename)
                 return self._separator
             except (ImportError, RuntimeError, OSError) as e:
                 self._separator = None
@@ -154,6 +167,9 @@ class DefaultSeparatorProvider:
 
             for output_file_str in output_files:
                 src = Path(output_file_str)
+                # If path is not absolute, look in working_dir
+                if not src.is_absolute():
+                    src = self.working_dir / src
                 if not src.exists():
                     logger.warning("Separated file not found at expected path", path=str(src))
                     continue
@@ -165,8 +181,9 @@ class DefaultSeparatorProvider:
 
             # Clean up any subdirectories created by the separator in working_dir
             # (htdemucs creates a subdirectory named after the input file)
+            # Don't delete directories that are parents of or equal to target_dir
             for item in self.working_dir.iterdir():
-                if item.is_dir() and item != target_dir:
+                if item.is_dir() and not target_dir.is_relative_to(item):
                     shutil.rmtree(item, ignore_errors=True)
 
             return result_paths
@@ -194,7 +211,7 @@ class AudioProcessor:
         self.storage = storage
         self.working_dir = Path(working_dir)
         self.separator_provider = separator_provider or DefaultSeparatorProvider(
-            models_dir=models_dir
+            models_dir=models_dir, working_dir=working_dir
         )
         self._ensure_working_dir()
 
@@ -267,14 +284,12 @@ class AudioProcessor:
         self,
         job_dir: Path,
         track_id: str,
-        youtube_url: str,
+        audio_url: str,
         max_file_size_mb: int,
         processing_timeout: int | None = None,
     ) -> tuple[dict[str, Path], str]:
-        logger.info("Downloading audio", track_id=track_id, youtube_url=youtube_url)
-        downloaded_file, original_title = self.download_audio(
-            job_dir, youtube_url, max_file_size_mb
-        )
+        logger.info("Downloading audio", track_id=track_id, audio_url=audio_url)
+        downloaded_file, original_title = self.download_audio(job_dir, audio_url, max_file_size_mb)
 
         logger.info("Separating audio", track_id=track_id)
         stem_files = self.separate_audio_tracks(
@@ -305,7 +320,7 @@ class AudioProcessor:
     def process_audio(
         self,
         track_id: str,
-        youtube_url: str,
+        audio_url: str,
         max_file_size_mb: int,
         processing_timeout: int | None = None,
     ) -> AudioProcessResult:
@@ -317,7 +332,7 @@ class AudioProcessor:
             stem_files, original_title = self._process_audio_files(
                 job_dir,
                 track_id,
-                youtube_url,
+                audio_url,
                 max_file_size_mb,
                 processing_timeout,
             )
@@ -331,7 +346,7 @@ class AudioProcessor:
 
         except (RuntimeError, OSError, FileNotFoundError, ValueError, TimeoutError) as e:
             logger.error(
-                "Audio processing failed", track_id=track_id, error=str(e), youtube_url=youtube_url
+                "Audio processing failed", track_id=track_id, error=str(e), audio_url=audio_url
             )
             self.storage.cleanup_track_files(track_id)
             raise
@@ -376,14 +391,14 @@ class AudioProcessor:
         return title_value if isinstance(title_value, str) else "Unknown Title"
 
     def download_audio(
-        self, job_dir: Path, youtube_url: str, max_file_size_mb: int
+        self, job_dir: Path, audio_url: str, max_file_size_mb: int
     ) -> tuple[Path, str | None]:
         def _download():
             # First pass: extract info to validate file size before downloading
             with yt_dlp.YoutubeDL(
-                {**BASE_YDL_OPTS, "format": "bestaudio/best"}
+                {**BASE_YT_DLP_OPTS, "format": "bestaudio/best"}
             ) as ydl:  # pyright: ignore[reportArgumentType]
-                video_info = ydl.extract_info(youtube_url, download=False)
+                video_info = ydl.extract_info(audio_url, download=False)
                 if not video_info:
                     raise RuntimeError("Could not extract video info from URL")
                 video_info = cast(YtDlpEntry, video_info)
@@ -391,13 +406,13 @@ class AudioProcessor:
                 original_title = self._extract_title_from_entry(video_info)
 
             # Second pass: download the validated video
-            download_opts: YoutubeDLOpts = {
-                **BASE_YDL_OPTS,
+            download_opts: YtDLOpts = {
+                **BASE_YT_DLP_OPTS,
                 "format": "bestaudio/best",
                 "outtmpl": str(job_dir / "original.%(ext)s"),
             }
             with yt_dlp.YoutubeDL(download_opts) as ydl:  # pyright: ignore[reportArgumentType]
-                ydl.download([youtube_url])
+                ydl.download([audio_url])
 
             for file_path in job_dir.iterdir():
                 if file_path.name.startswith("original."):
@@ -409,11 +424,13 @@ class AudioProcessor:
         try:
             return run_with_timeout(_download, timeout=300)
         except (DownloadError, ExtractorError) as e:
-            raise RuntimeError(f"YouTube download failed: {str(e)}") from e
+            raise RuntimeError(
+                f"Download failed - URL may not be supported by yt-dlp: {str(e)}"
+            ) from e
         except (OSError, IOError) as e:
             raise RuntimeError(f"File system error during download: {str(e)}") from e
         except (KeyError, TypeError, ValueError) as e:
-            raise RuntimeError(f"Invalid response data from YouTube: {str(e)}") from e
+            raise RuntimeError(f"Invalid response data from source: {str(e)}") from e
 
     def separate_audio_tracks(
         self,
@@ -432,7 +449,7 @@ class AudioProcessor:
                 "Separator configuration",
                 track_id=track_id,
                 output_dir=output_dir,
-                model=MODEL_FILENAME,
+                model=self.separator_provider.model_filename,
                 models_dir=self.separator_provider.models_dir,
             )
 

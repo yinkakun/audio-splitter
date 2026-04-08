@@ -1,22 +1,26 @@
+from pathlib import Path
+
 from pydantic import computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+PROJECT_ROOT = Path(__file__).parent.parent
 
 
 class Config(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         validate_default=True,
         extra="ignore",
     )
 
-    max_youtube_url_length: int = 200
+    max_url_length: int = 500
     max_file_size_mb: int = 50
 
     max_workers: int = 1
     max_active_jobs: int = 1
     cleanup_interval: int = 3600
-    processing_timeout: int = 60
+    processing_timeout: int = 900
 
     # Cache TTL values (in seconds)
     cache_ttl_seconds: int = 30 * 24 * 3600  # 30 days
@@ -34,6 +38,16 @@ class Config(BaseSettings):
     models_dir: str = "/tmp/audio-separator-models"
     working_dir: str = "audio_workspace"
     worker_name: str = ""
+
+    # Audio separation model and output settings
+    # Models (fastest to slowest): htdemucs, htdemucs_ft, htdemucs_6s
+    # htdemucs: faster, good quality
+    # htdemucs_ft: fine-tuned, best quality but slowest
+    separation_model: str = "htdemucs"
+    # Output formats: MP3 (smallest), FLAC (lossless compressed), WAV (uncompressed)
+    output_format: str = "MP3"
+    # MP3 bitrate (only used when output_format is MP3)
+    output_bitrate: str = "192k"
     worker_queue_names: str = "default"
     worker_concurrency: int = 1
 
