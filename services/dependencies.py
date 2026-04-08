@@ -1,6 +1,7 @@
 from fastapi import Depends
 
 from services.audio_cache import AudioCache
+from services.progress_subscriber import ProgressSubscriber
 from utils.rate_limiter import RateLimiter
 from utils.redis_cache import RedisCache
 from workers.job_queue import JobQueue
@@ -12,6 +13,7 @@ class Services:
         self.redis_cache: RedisCache | None = None
         self.cache_manager: AudioCache | None = None
         self.queue_manager: JobQueue | None = None
+        self.progress_subscriber: ProgressSubscriber | None = None
 
     async def close(self):
         """Close all services"""
@@ -21,6 +23,8 @@ class Services:
             await self.rate_limiter.close()
         if self.redis_cache:
             await self.redis_cache.close()
+        if self.progress_subscriber:
+            await self.progress_subscriber.close()
 
 
 services = Services()
@@ -29,3 +33,4 @@ services = Services()
 RateLimiterDep = Depends(lambda: services.rate_limiter)
 CacheManagerDep = Depends(lambda: services.cache_manager)
 QueueManagerDep = Depends(lambda: services.queue_manager)
+ProgressSubscriberDep = Depends(lambda: services.progress_subscriber)

@@ -22,12 +22,6 @@ class AudioCacheConfig:
 
 
 @dataclass(frozen=True)
-class WebhookConfig:
-    url: str
-    secret: str
-
-
-@dataclass(frozen=True)
 class DirectoryConfig:
     models: str
     working: str
@@ -41,7 +35,6 @@ class ProcessingJobRequest:
     processing_timeout: int | None
     cache_key: str
     storage_config: StorageConfig
-    webhook_config: WebhookConfig
     directory_config: DirectoryConfig
     cache_manager_config: AudioCacheConfig | None = None
     request_id: str = ""

@@ -27,10 +27,6 @@ class Config(BaseSettings):
     processing_ttl_seconds: int = 3600  # 1 hour
     cache_cleanup_ttl_seconds: int = 60
 
-    # Webhook retry settings
-    webhook_retry_max_attempts: int = 3
-    webhook_retry_base_delay: int = 2
-
     # Health check rate limiting
     health_check_rate_limit_requests: int = 1000
     health_check_rate_limit_window: int = 60
@@ -58,9 +54,9 @@ class Config(BaseSettings):
     debug: bool = False
     host: str = "0.0.0.0"
 
-    webhook_secret: str = ""
-    webhook_url: str = ""
     api_secret_key: str = ""
+    job_access_token_secret: str = ""
+    job_access_token_ttl_seconds: int = 3600
 
     # Cloudflare R2 for audio file storage
     cloudflare_account_id: str = ""
@@ -91,6 +87,11 @@ class Config(BaseSettings):
     @property
     def queue_names(self) -> list[str]:
         return [name.strip() for name in self.worker_queue_names.split(",") if name.strip()]
+
+    @computed_field
+    @property
+    def effective_job_access_token_secret(self) -> str:
+        return self.job_access_token_secret or self.api_secret_key
 
     def check_r2_environment_configs(self) -> None:
         missing_r2_configs = []

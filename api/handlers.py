@@ -3,7 +3,7 @@ import uuid as uuid_module
 from typing import Dict
 
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from config.logger import get_logger
@@ -14,11 +14,17 @@ from models.request import (
     ProcessingJobRequest,
     RedisConfig,
     StorageConfig,
-    WebhookConfig,
 )
 from services.audio_cache import AudioCache
-from services.dependencies import CacheManagerDep, QueueManagerDep, RateLimiterDep
+from services.dependencies import (
+    CacheManagerDep,
+    ProgressSubscriberDep,
+    QueueManagerDep,
+    RateLimiterDep,
+)
+from services.progress_subscriber import ProgressSubscriber
 from utils.rate_limiter import RateLimiter, parse_rate_limit
+from utils.job_access_token import JobAccessTokenManager
 from workers.job_queue import JobQueue
 
 logger = get_logger(__name__)
@@ -107,6 +113,11 @@ def register_error_handlers(app: FastAPI):
 
 
 def register_routes(app: FastAPI, config, storage):
+    job_access_token_manager = JobAccessTokenManager(
+        config.effective_job_access_token_secret,
+        config.job_access_token_ttl_seconds,
+    )
+
     async def _verify_api_key(request: Request):
         authorization = request.headers.get("Authorization")
         if not authorization or not authorization.startswith("Bearer "):
@@ -123,6 +134,34 @@ def register_routes(app: FastAPI, config, storage):
                 detail="Invalid or missing API key",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+    def _build_job_access_payload(track_id: str) -> dict[str, str | int]:
+        access_token, expires_at = job_access_token_manager.create_token(track_id)
+        return {
+            "access_token": access_token,
+            "access_token_expires_at": expires_at,
+        }
+
+    async def _verify_job_access(request: Request, track_id: str) -> None:
+        token = request.query_params.get("access_token")
+        if not token:
+            authorization = request.headers.get("Authorization", "")
+            if authorization.startswith("Bearer "):
+                token = authorization.removeprefix("Bearer ")
+
+        if not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing job access token",
+            )
+
+        try:
+            job_access_token_manager.verify_token(token, track_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+            ) from exc
 
     async def _apply_rate_limit(
         request: Request, rate_limit: str, rate_limiter: RateLimiter | None = None
@@ -184,6 +223,7 @@ def register_routes(app: FastAPI, config, storage):
                 if cached_result.get("status") == "processing":
                     await cache_manager.add_subscriber(audio_url, request_id)
                 logger.info("Returning cached/processing result for: %s", audio_url[:50])
+                cached_result.update(_build_job_access_payload(cached_result["track_id"]))
                 return cached_result
 
         track_id = str(uuid_module.uuid4())
@@ -217,7 +257,6 @@ def register_routes(app: FastAPI, config, storage):
             processing_timeout=config.processing_timeout,
             cache_key=cache_key,
             storage_config=storage_config,
-            webhook_config=WebhookConfig(url=config.webhook_url, secret=config.webhook_secret),
             directory_config=DirectoryConfig(models=config.models_dir, working=config.working_dir),
             cache_manager_config=cache_manager_config,
             request_id=request_id,
@@ -236,6 +275,7 @@ def register_routes(app: FastAPI, config, storage):
             "request_id": request_id,
             "status": JobStatus.PROCESSING.value,
             "message": "Audio separation started",
+            **_build_job_access_payload(track_id),
         }
 
     @app.get("/health", response_model=HealthResponse)
@@ -273,12 +313,12 @@ def register_routes(app: FastAPI, config, storage):
     async def get_job_status(
         request: Request, track_id: str, queue_manager: JobQueue | None = QueueManagerDep
     ):
-        await _verify_api_key(request)
-
         if not validate_track_id(track_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid track ID format"
             )
+
+        await _verify_job_access(request, track_id)
 
         if not queue_manager:
             raise HTTPException(
@@ -295,6 +335,36 @@ def register_routes(app: FastAPI, config, storage):
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to retrieve job status",
             ) from e
+
+    @app.get("/job/{track_id}/stream")
+    async def stream_job_progress(
+        request: Request,
+        track_id: str,
+        progress_subscriber: ProgressSubscriber | None = ProgressSubscriberDep,
+    ):
+        """Stream job progress via Server-Sent Events."""
+        if not validate_track_id(track_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid track ID format"
+            )
+
+        await _verify_job_access(request, track_id)
+
+        if not progress_subscriber:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Progress streaming unavailable - Redis not configured",
+            )
+
+        return StreamingResponse(
+            progress_subscriber.stream_progress(track_id, request),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get("/queue/info")
     async def get_queue_info(request: Request, queue_manager: JobQueue | None = QueueManagerDep):

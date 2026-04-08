@@ -14,6 +14,7 @@ export R2_ACCESS_KEY_ID=your_access_key
 export R2_SECRET_ACCESS_KEY=your_secret_key
 export R2_PUBLIC_DOMAIN=your_domain
 export API_SECRET_KEY=your_api_secret_key
+export JOB_ACCESS_TOKEN_SECRET=your_job_access_token_secret
 export REDIS_URL=rediss://username:password@your-upstash-redis.com:6379
 
 # Start services
@@ -31,8 +32,10 @@ curl -X POST http://localhost:5500/separate-audio \
   -d '{"audio_url": "https://soundcloud.com/artist/track", "request_id": "your-correlation-id"}'
 
 # Check status
-curl -H "Authorization: Bearer your_api_secret_key" \
-  http://localhost:5500/job/your-track-id
+curl "http://localhost:5500/job/your-track-id?access_token=your_job_access_token"
+
+# Stream progress
+curl -N "http://localhost:5500/job/your-track-id/stream?access_token=your_job_access_token"
 ```
 
 ## API
@@ -40,7 +43,8 @@ curl -H "Authorization: Bearer your_api_secret_key" \
 | Endpoint | Description |
 |----------|-------------|
 | `POST /separate-audio` | Start audio separation job |
-| `GET /job/{track_id}` | Get job status and results |
+| `GET /job/{track_id}` | Get job status and results with a per-job access token |
+| `GET /job/{track_id}/stream` | Stream job progress with a per-job access token |
 | `GET /health` | Health check |
 
 ### Request
@@ -64,48 +68,16 @@ curl -X POST http://localhost:5500/separate-audio \
   "track_id": "uuid",
   "request_id": "your-correlation-id",
   "status": "processing",
-  "message": "Audio separation started"
+  "message": "Audio separation started",
+  "access_token": "signed-job-token",
+  "access_token_expires_at": 1234569999
 }
 ```
 
-### Webhook Payload
-
-When a job completes (or fails), a webhook is sent to the configured `WEBHOOK_URL`. Multiple requests for the same URL are deduplicated - only one job runs, and all `request_id`s are included in the callback.
-
-**Success:**
-
-```json
-{
-  "status": "completed",
-  "track_id": "uuid",
-  "audio_url": "https://soundcloud.com/artist/track",
-  "request_ids": ["request-1", "request-2"],
-  "progress": 100,
-  "created_at": 1234567890.0,
-  "result": {
-    "stems_urls": {
-      "vocals": "https://...",
-      "drums": "https://...",
-      "bass": "https://...",
-      "other": "https://..."
-    }
-  }
-}
-```
-
-**Failure:**
-
-```json
-{
-  "status": "failed",
-  "track_id": "uuid",
-  "audio_url": "https://soundcloud.com/artist/track",
-  "request_ids": ["request-1", "request-2"],
-  "progress": 0,
-  "created_at": 1234567890.0,
-  "error": "Error message"
-}
-```
+The intended flow is:
+- Cloudflare Worker calls `POST /separate-audio` with the server-side API key after auth and credit checks.
+- FastAPI returns a short-lived `access_token` scoped to the `track_id`.
+- React uses that token directly against `GET /job/{track_id}` and `GET /job/{track_id}/stream`.
 
 ## Configuration
 
@@ -114,6 +86,7 @@ Required environment variables:
 | Variable | Description |
 |----------|-------------|
 | `API_SECRET_KEY` | API authentication key |
+| `JOB_ACCESS_TOKEN_SECRET` | Secret used to sign browser-facing per-job access tokens; falls back to `API_SECRET_KEY` if unset |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
 | `R2_ACCESS_KEY_ID` | R2 storage access key |
 | `R2_SECRET_ACCESS_KEY` | R2 storage secret key |
@@ -122,7 +95,7 @@ Required environment variables:
 
 Optional:
 
-- `WEBHOOK_URL` - Job completion notifications
+- `JOB_ACCESS_TOKEN_TTL_SECONDS` - Per-job token lifetime in seconds (default: `3600`)
 - `PORT` - Server port (default: 5500)
 
 ## Deployment

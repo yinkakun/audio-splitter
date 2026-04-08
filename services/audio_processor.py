@@ -3,7 +3,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from pathlib import Path
-from typing import Required, TypedDict, cast
+from typing import Callable, Required, TypedDict, cast
 
 import yt_dlp
 from audio_separator.separator import Separator
@@ -13,6 +13,8 @@ from config.logger import get_logger
 from services.audio_classifier import AudioClassifier
 
 logger = get_logger(__name__)
+
+ProgressCallback = Callable[[str], None]  # Called with stage name
 
 DEFAULT_MODEL_FILENAME = "htdemucs.yaml"
 DEFAULT_OUTPUT_FORMAT = "MP3"
@@ -287,9 +289,13 @@ class AudioProcessor:
         audio_url: str,
         max_file_size_mb: int,
         processing_timeout: int | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> tuple[dict[str, Path], str]:
         logger.info("Downloading audio", track_id=track_id, audio_url=audio_url)
         downloaded_file, original_title = self.download_audio(job_dir, audio_url, max_file_size_mb)
+
+        if progress_callback:
+            progress_callback("separating")
 
         logger.info("Separating audio", track_id=track_id)
         stem_files = self.separate_audio_tracks(
@@ -323,20 +329,28 @@ class AudioProcessor:
         audio_url: str,
         max_file_size_mb: int,
         processing_timeout: int | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> AudioProcessResult:
         job_dir: Path | None = None
+
+        def emit_progress(stage: str) -> None:
+            if progress_callback:
+                progress_callback(stage)
 
         try:
             job_dir = self._setup_job_directory(track_id)
 
+            emit_progress("downloading")
             stem_files, original_title = self._process_audio_files(
                 job_dir,
                 track_id,
                 audio_url,
                 max_file_size_mb,
                 processing_timeout,
+                progress_callback=progress_callback,
             )
 
+            emit_progress("uploading")
             result = self._upload_and_create_result(track_id, stem_files, original_title)
 
             logger.info(

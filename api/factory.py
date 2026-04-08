@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config.logger import get_logger
 from services.audio_cache import AudioCache
 from services.dependencies import services
+from services.progress_subscriber import ProgressSubscriber
 from utils.rate_limiter import RateLimiter
 from utils.redis_cache import RedisCache
 from workers.job_queue import JobQueue
@@ -23,12 +24,14 @@ async def initialize_services(config, storage) -> None:
             services.rate_limiter = RateLimiter(config.redis_url)
             services.redis_cache = RedisCache(config.redis_url)
             services.cache_manager = AudioCache(services.redis_cache, storage)
+            services.progress_subscriber = ProgressSubscriber(config.redis_url)
             logger.info("Redis services initialized")
         except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
             services.rate_limiter = None
             services.redis_cache = None
             services.queue_manager = None
             services.cache_manager = None
+            services.progress_subscriber = None
             logger.error(f"Failed to initialize Redis services: {e}")
     else:
         logger.warning("Redis not configured - Redis services disabled")
