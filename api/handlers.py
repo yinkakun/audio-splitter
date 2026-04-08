@@ -1,4 +1,3 @@
-import re
 import time
 import uuid as uuid_module
 from typing import Dict
@@ -48,17 +47,16 @@ def validate_track_id(track_id: str) -> bool:
 
 
 class SeparationRequest(BaseModel):
-    youtube_url: str = Field(..., min_length=1, max_length=200)
+    audio_url: str = Field(..., min_length=1, max_length=500)
     request_id: str = Field(..., min_length=1, max_length=100)
 
-    @field_validator("youtube_url")
+    @field_validator("audio_url")
     @classmethod
-    def validate_youtube_url(cls, v):
-        sanitized = sanitize_input(v, 200)
-        # Match youtube.com/watch?v=, youtu.be/, and youtube.com/shorts/ URLs
-        youtube_pattern = r"^(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w-]+"
-        if not re.match(youtube_pattern, sanitized):
-            raise ValueError("Invalid YouTube URL format")
+    def validate_audio_url(cls, v):
+        sanitized = sanitize_input(v, 500)
+        # Basic URL validation - yt-dlp will handle the actual compatibility check
+        if not sanitized.startswith(("http://", "https://")):
+            raise ValueError("URL must start with http:// or https://")
         return sanitized
 
     @field_validator("request_id")
@@ -168,9 +166,9 @@ def register_routes(app: FastAPI, config, storage):
 
         await _apply_rate_limit(request, config.rate_limit_requests, rate_limiter)
         try:
-            youtube_url = sanitize_input(
-                separation_request.youtube_url,
-                config.max_youtube_url_length,
+            audio_url = sanitize_input(
+                separation_request.audio_url,
+                config.max_url_length,
             )
         except ValueError as e:
             raise HTTPException(
@@ -180,12 +178,12 @@ def register_routes(app: FastAPI, config, storage):
         request_id = separation_request.request_id
 
         if cache_manager:
-            cached_result = await cache_manager.get_cached_or_processing(youtube_url)
+            cached_result = await cache_manager.get_cached_or_processing(audio_url)
             if cached_result:
                 # Add this request as a subscriber if URL is still processing
                 if cached_result.get("status") == "processing":
-                    await cache_manager.add_subscriber(youtube_url, request_id)
-                logger.info("Returning cached/processing result for: %s", youtube_url[:50])
+                    await cache_manager.add_subscriber(audio_url, request_id)
+                logger.info("Returning cached/processing result for: %s", audio_url[:50])
                 return cached_result
 
         track_id = str(uuid_module.uuid4())
@@ -198,7 +196,7 @@ def register_routes(app: FastAPI, config, storage):
 
         cache_key = ""
         if cache_manager:
-            cache_key = await cache_manager.mark_processing_start(youtube_url, track_id, request_id)
+            cache_key = await cache_manager.mark_processing_start(audio_url, track_id, request_id)
 
         storage_config = StorageConfig(
             account_id=config.cloudflare_account_id,
@@ -214,7 +212,7 @@ def register_routes(app: FastAPI, config, storage):
 
         job_request = ProcessingJobRequest(
             track_id=track_id,
-            youtube_url=youtube_url,
+            audio_url=audio_url,
             max_file_size_mb=config.max_file_size_mb,
             processing_timeout=config.processing_timeout,
             cache_key=cache_key,
@@ -225,12 +223,12 @@ def register_routes(app: FastAPI, config, storage):
             request_id=request_id,
         )
 
-        queue_manager.enqueue_job(job_request)
+        queue_manager.enqueue_job(job_request, job_timeout=config.processing_timeout)
 
         logger.info(
-            "Accepted job %s for YouTube URL: %s",
+            "Accepted job %s for URL: %s",
             track_id,
-            youtube_url[:50] + ("..." if len(youtube_url) > 50 else ""),
+            audio_url[:50] + ("..." if len(audio_url) > 50 else ""),
         )
 
         return {

@@ -65,8 +65,8 @@ def create_lifespan_manager(config, storage):
 def create_base_app(config) -> FastAPI:
     return FastAPI(
         version="1.0.0",
-        title="YouTube Audio Separator API",
-        description="API for separating YouTube audio into stems",
+        title="Audio Separator API",
+        description="API for separating audio from yt-dlp compatible URLs into stems",
         docs_url="/docs" if config.debug else None,
         redoc_url="/redoc" if config.debug else None,
     )
